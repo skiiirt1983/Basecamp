@@ -19,6 +19,10 @@
 #define BTN_PITCH 104
 #define CARD_Y0   8      /* vertical offset of the middle card */
 
+/* Grey "empty / failed" look. Not LV_STATE_DISABLED: LVGL does not deliver
+ * input events to disabled objects, and these cards must stay tappable. */
+#define CARD_EMPTY LV_STATE_USER_1
+
 static const uint32_t s_accent[BASECAMP_NUM_SLOTS] = {0xFF7A1A, 0x18C8B0, 0xC850F0};
 
 static ui_request_cb_t s_cb;
@@ -127,12 +131,12 @@ static void card_text(int i)
     lv_label_set_text(s_card_name[i], s->name);
     const char *label_txt = s->part ? s->part->label : "?";
     if (!s->valid) {
-        lv_obj_add_state(s_card[i], LV_STATE_DISABLED);
+        lv_obj_add_state(s_card[i], CARD_EMPTY);
         lv_label_set_text_fmt(s_card_sub[i], LV_SYMBOL_DOWNLOAD " %s - tap to install", s->detail);
         lv_obj_set_style_text_color(s_card_name[i], lv_color_hex(0x5A5A5A), 0);
         lv_obj_set_style_text_color(s_card_sub[i], lv_color_hex(0x6A6A6A), 0);
     } else {
-        lv_obj_remove_state(s_card[i], LV_STATE_DISABLED);
+        lv_obj_remove_state(s_card[i], CARD_EMPTY);
         lv_obj_set_style_text_color(s_card_name[i], lv_color_white(), 0);
         if (s->changed) {
             lv_label_set_text_fmt(s_card_sub[i], LV_SYMBOL_WARNING " %s  changed", s->version);
@@ -174,8 +178,9 @@ static void make_card(lv_obj_t *scr, int i)
     pill_style(btn, s_accent[i]);
     lv_obj_set_style_border_width(btn, 3, 0);
     /* Empty / failed slots look grey but stay tappable (retry install). */
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1A1A1A), LV_STATE_DISABLED);
-    lv_obj_set_style_border_color(btn, lv_color_hex(0x3A3A3A), LV_STATE_DISABLED);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1A1A1A), CARD_EMPTY);
+    lv_obj_set_style_border_color(btn, lv_color_hex(0x3A3A3A), CARD_EMPTY);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x333333), CARD_EMPTY | LV_STATE_PRESSED);
     lv_obj_set_style_pad_all(btn, 6, 0);
     lv_obj_add_event_cb(btn, card_click_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
     lv_obj_add_event_cb(btn, card_long_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)i);

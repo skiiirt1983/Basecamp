@@ -21,11 +21,14 @@ const inst_source_t *inst_source(int slot);
 typedef struct {
     char tag[32];
     char asset_name[96];
-    char url[256];
+    char url[256];             /* browser_download_url (fallback) */
+    char api_url[160];         /* api.github.com/.../releases/assets/<id> (preferred) */
     uint32_t size;
     bool has_digest;
     uint8_t sha256[32];
 } inst_release_t;
+
+/* Errors worth retrying (HTTP 5xx/429, network) come back as ESP_ERR_TIMEOUT. */
 
 /* GET /repos/<repo>/releases/latest and pick the slot's asset. */
 esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err_len);

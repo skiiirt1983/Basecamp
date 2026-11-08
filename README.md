@@ -123,7 +123,8 @@ The stock `bootloader_utility_load_boot_image()` falls back to *lower OTA slots*
   - A wrong-board image is rejected, or shows as a grey "wrong board" card that can be tapped to reinstall.
 - **Checks:**
   - Assets larger than the 4 MB slot are rejected.
-  - The download follows the redirect to `release-assets.githubusercontent.com`, verified against the IDF CA bundle.
+  - The download uses the API asset URL (`api.github.com/repos/<repo>/releases/assets/<id>` with `Accept: application/octet-stream`), which redirects to `release-assets.githubusercontent.com`, verified against the IDF CA bundle. The `github.com/.../releases/download/...` route is only a fallback: in testing it often answered 504 after about 11 s, while the API route answered in under a second.
+  - HTTP 5xx/429 responses, timeouts and dropped connections are retried automatically (4 attempts, with 3 s, 6 s and 9 s pauses). A failure before the first byte is written leaves an installed app untouched.
   - It is streamed into the slot with `esp_ota_begin/write/end` on that partition. **`esp_ota_set_boot_partition` is never called.**
   - The SHA-256 is checked against the asset's `digest` when GitHub provides one. `esp_ota_end` verifies the image, and `project_name` is checked afterwards.
 - **On success:** the release tag is saved in NVS (`tag0`..`tag2`) and the overwrite guard is re-baselined.

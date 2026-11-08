@@ -1,8 +1,11 @@
 /*
  * Installs app slots straight from GitHub releases:
  *   GET https://api.github.com/repos/<repo>/releases/latest
- *   -> pick the slot's asset -> stream browser_download_url (302 to
- *   release-assets.githubusercontent.com) into the OTA partition.
+ *   -> pick the slot's asset -> stream it into the OTA partition via the API
+ *   asset URL (api.github.com/.../releases/assets/<id>, Accept:
+ *   application/octet-stream, 302 to release-assets.githubusercontent.com).
+ *   The github.com/.../releases/download route is only a fallback: it often
+ *   answers 504 after ~11 s, while the API route answers in <1 s.
  * Only esp_ota_begin/write/end on the target partition is used; the boot
  * partition / otadata is never changed (the Basecamp bootloader ignores it).
  */
@@ -204,9 +207,10 @@ esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err
 
     int status = 0;
     int64_t clen = 0;
-    if (open_follow(c, &status, &clen) != ESP_OK) FAIL(ESP_FAIL, "GitHub unreachable");
-    if (status == 403 || status == 429) FAIL(ESP_FAIL, "GitHub rate limit - try later");
+    if (open_follow(c, &status, &clen) != ESP_OK) FAIL(ESP_ERR_TIMEOUT, "GitHub unreachable");
+    if (status == 403 || status == 429) FAIL(ESP_FAIL, "GitHub rate limit - try in an hour");
     if (status == 404) FAIL(ESP_ERR_NOT_FOUND, "%s has no release", src->repo);
+    if (status >= 500) FAIL(ESP_ERR_TIMEOUT, "GitHub API HTTP %d", status);
     if (status != 200) FAIL(ESP_FAIL, "GitHub API HTTP %d", status);
 
     body = heap_caps_malloc(API_MAX_BODY + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -232,6 +236,10 @@ esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err
             continue;
         }
         const cJSON *dl = cJSON_GetObjectItem(a, "browser_download_url");
+        const cJSON *api = cJSON_GetObjectItem(a, "url");
+        if (cJSON_IsString(api)) {
+            strlcpy(out->api_url, api->valuestring, sizeof(out->api_url));
+        }
         const cJSON *size = cJSON_GetObjectItem(a, "size");
         const cJSON *digest = cJSON_GetObjectItem(a, "digest");
         if (!cJSON_IsString(dl) || !cJSON_IsNumber(size)) {
@@ -312,12 +320,13 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
 
     buf = malloc(DL_CHUNK);
     if (!buf) FAIL(ESP_ERR_NO_MEM, "no memory");
-    c = make_client(rel->url, false);
+    c = make_client(rel->api_url[0] ? rel->api_url : rel->url, false);
     if (!c) FAIL(ESP_ERR_NO_MEM, "http client");
 
     int status = 0;
     int64_t clen = 0;
-    if (open_follow(c, &status, &clen) != ESP_OK) FAIL(ESP_FAIL, "download failed to start");
+    if (open_follow(c, &status, &clen) != ESP_OK) FAIL(ESP_ERR_TIMEOUT, "download failed to start");
+    if (status >= 500 || status == 429) FAIL(ESP_ERR_TIMEOUT, "download HTTP %d", status);
     if (status != 200) FAIL(ESP_FAIL, "download HTTP %d", status);
     if (clen > 0 && (uint64_t)clen != rel->size)
         FAIL(ESP_ERR_INVALID_SIZE, "size mismatch (%ld vs %" PRIu32 ")", (long)clen, rel->size);
@@ -336,12 +345,12 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
     marker_init(&board, src->board_marker);
     while (got < rel->size) {
         int r = esp_http_client_read(c, (char *)buf, DL_CHUNK);
-        if (r < 0) FAIL(ESP_FAIL, "download interrupted");
+        if (r < 0) FAIL(ESP_ERR_TIMEOUT, "download interrupted");
         if (r == 0) {
             if (esp_http_client_is_complete_data_received(c)) {
                 break;
             }
-            FAIL(ESP_FAIL, "download stalled");
+            FAIL(ESP_ERR_TIMEOUT, "download stalled");
         }
         if (got + r > rel->size) FAIL(ESP_ERR_INVALID_SIZE, "asset larger than announced");
         mbedtls_sha256_update(&sha, buf, r);
@@ -367,7 +376,7 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
     esp_app_desc_t desc;
     if (esp_ota_get_partition_description(part, &desc) != ESP_OK) FAIL(ESP_FAIL, "no app descriptor");
     if (!strstr(desc.project_name, src->project_match))
-        FAIL(ESP_FAIL, "wrong app: '%s' (expected '%s')", desc.project_name, src->project_match);
+        FAIL(ESP_ERR_INVALID_VERSION, "wrong app: '%s' (expected '%s')", desc.project_name, src->project_match);
 
     save_tag(slot, rel->tag);
     basecamp_slot_t s = {.part = part};

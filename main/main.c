@@ -35,6 +35,7 @@ typedef struct {
 } job_t;
 
 #define ALL_SLOTS ((1u << BASECAMP_NUM_SLOTS) - 1)
+#define INSTALL_ATTEMPTS 4
 
 static void restart_to_menu(void)
 {
@@ -115,13 +116,26 @@ static void do_install(uint32_t mask, bool update)
         }
         char err[96] = "";
         static inst_release_t rel;
-        ui_progress_slot(i, 0, "checking GitHub", false);
-        esp_err_t e = inst_fetch_latest(i, &rel, err, sizeof(err));
-        if (e == ESP_OK) {
+        esp_err_t e = ESP_FAIL;
+        /* GitHub hiccups (5xx, timeouts, dropped connections) are retried
+         * automatically; wrong app / board / size errors are not. */
+        for (int attempt = 1; attempt <= INSTALL_ATTEMPTS; attempt++) {
             char state[48];
-            snprintf(state, sizeof(state), "downloading %s", rel.tag);
-            ui_progress_slot(i, 0, state, false);
-            e = inst_install(i, &rel, progress_cb, state, err, sizeof(err));
+            if (attempt > 1) {
+                snprintf(state, sizeof(state), "retry %d/%d in %ds", attempt, INSTALL_ATTEMPTS, 3 * (attempt - 1));
+                ui_progress_slot(i, 0, state, false);
+                vTaskDelay(pdMS_TO_TICKS(3000 * (attempt - 1)));
+            }
+            ui_progress_slot(i, 0, "checking GitHub", false);
+            e = inst_fetch_latest(i, &rel, err, sizeof(err));
+            if (e == ESP_OK) {
+                snprintf(state, sizeof(state), "downloading %s", rel.tag);
+                ui_progress_slot(i, 0, state, false);
+                e = inst_install(i, &rel, progress_cb, state, err, sizeof(err));
+            }
+            if (e != ESP_ERR_TIMEOUT) {
+                break;
+            }
         }
         if (e == ESP_OK) {
             ui_progress_slot(i, 100, "installed", false);
@@ -164,7 +178,14 @@ static void do_check_updates(void)
         const basecamp_slot_t *s = &s_slots[i];
         static inst_release_t rel;
         char err[96], row[140];
-        if (inst_fetch_latest(i, &rel, err, sizeof(err)) != ESP_OK) {
+        esp_err_t fe = ESP_ERR_TIMEOUT;
+        for (int attempt = 0; attempt < INSTALL_ATTEMPTS && fe == ESP_ERR_TIMEOUT; attempt++) {
+            if (attempt) {
+                vTaskDelay(pdMS_TO_TICKS(2000 * attempt));
+            }
+            fe = inst_fetch_latest(i, &rel, err, sizeof(err));
+        }
+        if (fe != ESP_OK) {
             snprintf(row, sizeof(row), "check failed: %.95s", err);
             ui_updates_row(i, row, false);
             continue;
