@@ -1,0 +1,13 @@
+build/
+build_*/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+apps/*.bin
+dist/
+test_apps/*/build*/
+test_apps/*/managed_components/
+test_apps/*/sdkconfig
+test_apps/*/sdkconfig.old
+test_apps/*/dependencies.lock

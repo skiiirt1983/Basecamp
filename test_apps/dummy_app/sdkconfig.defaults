@@ -1,0 +1,2 @@
+# Same fixed partition table as the launcher project
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../../partitions.csv"

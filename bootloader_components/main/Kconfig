@@ -1,0 +1,13 @@
+menu "Basecamp bootloader"
+
+    config BASECAMP_USB_RESET_IS_COLD
+        bool "Treat USB-Serial-JTAG chip resets as a cold boot (return to menu)"
+        default y
+        help
+            esptool / idf.py monitor reset the chip through the USB-Serial-JTAG
+            peripheral (reset reasons USB_UART / USB_JTAG). When enabled, such
+            resets discard the stored slot selection and boot the launcher, which
+            is what you want after flashing. Disable if an app relies on host-
+            triggered resets staying inside the app.
+
+endmenu

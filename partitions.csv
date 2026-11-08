@@ -1,0 +1,10 @@
+# SLOPEFORM / Project Basecamp partition table (fixed - do not change offsets)
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x80000
+otadata,  data, ota,     0x89000,  0x2000
+phy_init, data, phy,     0x8B000,  0x1000
+launcher, app,  factory, 0x90000,  0x100000
+ota_0,    app,  ota_0,   0x190000, 0x400000
+ota_1,    app,  ota_1,   0x590000, 0x400000
+ota_2,    app,  ota_2,   0x990000, 0x400000
+sounds,   data, 0x83,    0xD90000, 0x270000

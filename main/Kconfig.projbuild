@@ -1,0 +1,35 @@
+menu "Basecamp launcher"
+
+    config BASECAMP_SLOT0_NAME
+        string "ota_0 display name"
+        default "PrintSphere"
+    config BASECAMP_SLOT1_NAME
+        string "ota_1 display name"
+        default "Capsule Radar"
+    config BASECAMP_SLOT2_NAME
+        string "ota_2 display name"
+        default "LyricFlash"
+
+    config BASECAMP_SLOT0_VERSION
+        string "ota_0 version label if the app descriptor is generic"
+        default ""
+    config BASECAMP_SLOT1_VERSION
+        string "ota_1 version label if the app descriptor is generic"
+        default "v1.6.0"
+        help
+            Arduino builds carry project_name "arduino-lib-builder" and the
+            lib-builder git hash as version, so the real version can't be read
+            from esp_app_desc_t. This label is shown instead (marked with "*").
+    config BASECAMP_SLOT2_VERSION
+        string "ota_2 version label if the app descriptor is generic"
+        default ""
+
+    config BASECAMP_VERIFY_SLOTS
+        bool "Fully verify each slot image (SHA-256) before showing it as bootable"
+        default y
+        help
+            Adds roughly 100-200 ms per populated slot to launcher start-up.
+            When disabled, only the image header and app descriptor are checked
+            (the bootloader still verifies before booting).
+
+endmenu
