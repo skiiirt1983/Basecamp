@@ -312,8 +312,10 @@ void ui_show_progress(const char *ttl, uint32_t mask)
         lv_obj_set_style_arc_color(ring, lv_color_hex(0x262626), LV_PART_MAIN);
         lv_obj_set_style_arc_color(ring, lv_color_hex(s_accent[i]), LV_PART_INDICATOR);
 
-        s_ring_pct[i] = label(scr, &lv_font_montserrat_20, 0xFFFFFF, "--");
-        lv_obj_align_to(s_ring_pct[i], ring, LV_ALIGN_CENTER, 0, 0);
+        /* Child of the ring + centre alignment: LVGL keeps it centred when
+         * the text (and so the label width) changes. */
+        s_ring_pct[i] = label(ring, &lv_font_montserrat_20, 0xFFFFFF, "--");
+        lv_obj_center(s_ring_pct[i]);
 
         lv_obj_t *nm = label(scr, &lv_font_montserrat_14, 0xFFFFFF, s_slots[i].name);
         lv_obj_align_to(nm, ring, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
