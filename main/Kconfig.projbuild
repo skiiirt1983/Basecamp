@@ -46,6 +46,15 @@ menu "Basecamp launcher"
         config BASECAMP_SLOT0_PROJECT
             string "ota_0 project_name must contain"
             default "printsphere"
+        config BASECAMP_SLOT0_ASSET_EXCLUDE
+            string "ota_0 skip assets whose name contains (comma-separated)"
+            default "2.8c"
+            help
+                PrintSphere also publishes a build for the ESP32-S3-Touch-LCD-2.8C
+                (printsphere_ota-<tag>-2.8c.bin) with the same project_name.
+        config BASECAMP_SLOT0_BOARD_MARKER
+            string "ota_0 image must contain (board check)"
+            default "esp32_s3_touch_amoled_1_75"
 
         config BASECAMP_SLOT1_REPO
             string "ota_1 GitHub repo (owner/repo)"
@@ -61,6 +70,12 @@ menu "Basecamp launcher"
             default "arduino-lib-builder"
             help
                 Capsule Radar is an Arduino build; its descriptor is generic.
+        config BASECAMP_SLOT1_ASSET_EXCLUDE
+            string "ota_1 skip assets whose name contains (comma-separated)"
+            default ""
+        config BASECAMP_SLOT1_BOARD_MARKER
+            string "ota_1 image must contain (board check)"
+            default "CO5300"
 
         config BASECAMP_SLOT2_REPO
             string "ota_2 GitHub repo (owner/repo)"
@@ -74,6 +89,12 @@ menu "Basecamp launcher"
         config BASECAMP_SLOT2_PROJECT
             string "ota_2 project_name must contain"
             default "lyricflash"
+        config BASECAMP_SLOT2_ASSET_EXCLUDE
+            string "ota_2 skip assets whose name contains (comma-separated)"
+            default ""
+        config BASECAMP_SLOT2_BOARD_MARKER
+            string "ota_2 image must contain (board check)"
+            default "esp32_s3_touch_amoled_1_75"
     endmenu
 
 endmenu

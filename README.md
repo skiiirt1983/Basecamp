@@ -113,11 +113,14 @@ The stock `bootloader_utility_load_boot_image()` falls back to *lower OTA slots*
 
   | Slot | Repo | Asset | `project_name` must contain |
   |---|---|---|---|
-  | ota_0 | cptkirki/PrintSphere | `printsphere_ota*.bin` | `printsphere` |
+  | ota_0 | cptkirki/PrintSphere | `printsphere_ota*.bin`, not `*2.8c*` | `printsphere` |
   | ota_1 | socquique/capsule-radar | `CapsuleRadar-ota.bin` | `arduino-lib-builder` (Arduino) |
   | ota_2 | skiiirt1983/LyricFlash | `lyricflash-ota.bin` | `lyricflash` |
 
   All of these are Kconfig options (`menuconfig → Basecamp launcher → App sources`).
+- **Board check:** PrintSphere publishes one build for this board (`printsphere_ota-<tag>.bin`) and one for the ESP32-S3-Touch-LCD-2.8C (`…-2.8c.bin`). Both have the same `project_name`, so the 2.8C asset is excluded by name. On top of that, every image must contain a per-slot marker string: `esp32_s3_touch_amoled_1_75` for PrintSphere and LyricFlash, `CO5300` for Capsule Radar.
+  - The marker is checked while downloading, and again for installed slots when the menu starts.
+  - A wrong-board image is rejected, or shows as a grey "wrong board" card that can be tapped to reinstall.
 - **Checks:**
   - Assets larger than the 4 MB slot are rejected.
   - The download follows the redirect to `release-assets.githubusercontent.com`, verified against the IDF CA bundle.

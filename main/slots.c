@@ -122,6 +122,12 @@ static void scan_one(int i, basecamp_slot_t *s)
     if (md.image.hash_appended) {
         digest = md.image_digest;
     }
+    /* Board check (e.g. PrintSphere's LCD 2.8C build installed by 0.2.0). */
+    if (!inst_image_has_marker(i, s->part, md.image_len)) {
+        strlcpy(s->detail, "wrong board", sizeof(s->detail));
+        ESP_LOGW(TAG, "%s: image is built for a different board", s->part->label);
+        return;
+    }
 #endif
 
     s->valid = true;

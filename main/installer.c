@@ -32,11 +32,14 @@ static const char *TAG = "install";
 
 static const inst_source_t s_sources[BASECAMP_NUM_SLOTS] = {
     {CONFIG_BASECAMP_SLOT0_REPO, CONFIG_BASECAMP_SLOT0_ASSET_PREFIX,
-     CONFIG_BASECAMP_SLOT0_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT0_PROJECT},
+     CONFIG_BASECAMP_SLOT0_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT0_PROJECT,
+     CONFIG_BASECAMP_SLOT0_ASSET_EXCLUDE, CONFIG_BASECAMP_SLOT0_BOARD_MARKER},
     {CONFIG_BASECAMP_SLOT1_REPO, CONFIG_BASECAMP_SLOT1_ASSET_PREFIX,
-     CONFIG_BASECAMP_SLOT1_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT1_PROJECT},
+     CONFIG_BASECAMP_SLOT1_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT1_PROJECT,
+     CONFIG_BASECAMP_SLOT1_ASSET_EXCLUDE, CONFIG_BASECAMP_SLOT1_BOARD_MARKER},
     {CONFIG_BASECAMP_SLOT2_REPO, CONFIG_BASECAMP_SLOT2_ASSET_PREFIX,
-     CONFIG_BASECAMP_SLOT2_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT2_PROJECT},
+     CONFIG_BASECAMP_SLOT2_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT2_PROJECT,
+     CONFIG_BASECAMP_SLOT2_ASSET_EXCLUDE, CONFIG_BASECAMP_SLOT2_BOARD_MARKER},
 };
 
 const inst_source_t *inst_source(int slot)
@@ -111,11 +114,74 @@ static bool hex_to_bytes(const char *hex, uint8_t *out, size_t n)
     return true;
 }
 
+static bool excluded(const inst_source_t *src, const char *name)
+{
+    char list[64];
+    strlcpy(list, src->asset_exclude, sizeof(list));
+    for (char *save = NULL, *tok = strtok_r(list, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+        while (*tok == ' ') tok++;
+        if (*tok && strcasestr(name, tok)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool name_matches(const inst_source_t *src, const char *name)
 {
     size_t nl = strlen(name), pl = strlen(src->asset_prefix), sl = strlen(src->asset_suffix);
     return nl >= pl && nl >= sl && strncmp(name, src->asset_prefix, pl) == 0 &&
-           strcmp(name + nl - sl, src->asset_suffix) == 0;
+           strcmp(name + nl - sl, src->asset_suffix) == 0 && !excluded(src, name);
+}
+
+/* Streaming substring search across chunk boundaries. */
+typedef struct {
+    const char *pat;
+    size_t len, matched;
+    bool found;
+} marker_t;
+
+static void marker_init(marker_t *m, const char *pat)
+{
+    m->pat = pat;
+    m->len = strlen(pat);
+    m->matched = 0;
+    m->found = (m->len == 0);
+}
+
+static void marker_feed(marker_t *m, const uint8_t *d, size_t n)
+{
+    for (size_t i = 0; i < n && !m->found; i++) {
+        /* Naive restart is fine: the markers have no repeated prefix. */
+        if (d[i] == (uint8_t)m->pat[m->matched]) {
+            if (++m->matched == m->len) {
+                m->found = true;
+            }
+        } else {
+            m->matched = (d[i] == (uint8_t)m->pat[0]) ? 1 : 0;
+        }
+    }
+}
+
+bool inst_image_has_marker(int slot, const esp_partition_t *part, uint32_t len)
+{
+    const inst_source_t *src = inst_source(slot);
+    marker_t m;
+    marker_init(&m, src ? src->board_marker : "");
+    if (m.found) {
+        return true;
+    }
+    if (len == 0 || len > part->size) {
+        len = part->size;
+    }
+    const void *map;
+    esp_partition_mmap_handle_t h;
+    if (esp_partition_mmap(part, 0, len, ESP_PARTITION_MMAP_DATA, &map, &h) != ESP_OK) {
+        return true; /* cannot check - do not block */
+    }
+    marker_feed(&m, map, len);
+    esp_partition_munmap(h);
+    return m.found;
 }
 
 esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err_len)
@@ -266,6 +332,8 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
 
     uint32_t got = 0;
     int last_pct = -1;
+    marker_t board;
+    marker_init(&board, src->board_marker);
     while (got < rel->size) {
         int r = esp_http_client_read(c, (char *)buf, DL_CHUNK);
         if (r < 0) FAIL(ESP_FAIL, "download interrupted");
@@ -277,6 +345,7 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
         }
         if (got + r > rel->size) FAIL(ESP_ERR_INVALID_SIZE, "asset larger than announced");
         mbedtls_sha256_update(&sha, buf, r);
+        marker_feed(&board, buf, r);
         if (esp_ota_write(ota, buf, r) != ESP_OK) FAIL(ESP_FAIL, "flash write failed");
         got += r;
         int pct = (int)((uint64_t)got * 100 / rel->size);
@@ -290,6 +359,7 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
     uint8_t digest[32];
     mbedtls_sha256_finish(&sha, digest);
     if (rel->has_digest && memcmp(digest, rel->sha256, 32) != 0) FAIL(ESP_ERR_INVALID_CRC, "sha256 mismatch");
+    if (!board.found) FAIL(ESP_ERR_INVALID_VERSION, "built for a different board");
 
     ota_open = false;
     if (esp_ota_end(ota) != ESP_OK) FAIL(ESP_ERR_OTA_VALIDATE_FAILED, "image failed verification");
