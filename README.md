@@ -172,6 +172,7 @@ esptool.py --chip esp32s3 write_flash 0x590000 new.bin
 - **Changing the partition table.** The table is fixed.
 
 ### Other caveats
+- **A full flash wipes every app's settings.** `flash.sh` and the single-image flash erase `nvs`, so all apps lose Wi-Fi credentials, tokens and preferences. For example, LyricFlash won't record until its Wi-Fi and AudD token are set again. To keep settings, re-flash only the slot you need (e.g. `esptool.py write_flash 0x990000 lyricflash-ota.bin`).
 - **Shared NVS.** All three apps and the launcher share one `nvs` partition. Namespaces usually differ, but IDF Wi-Fi config (`nvs.net80211`) is shared. An app that relies on stored Wi-Fi config may see another app's network.
 - **Crash loops.** An app that crash-loops stays in that app; this is how "restarts stay in the app" works. A power cycle or the RST button always returns to the menu.
 - **`sounds` is used by PrintSphere, not LyricFlash.** Strings in the binaries show PrintSphere mounting LittleFS `sounds` (`/sounds/snd_%u.pcm`). LyricFlash only contains the BSP's generic `storage`/SPIFFS string, and no partition by that label exists here. Either way, `sounds` starts empty.
