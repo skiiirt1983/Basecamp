@@ -6,6 +6,7 @@
 #include "esp_ota_ops.h"
 #include "esp_image_format.h"
 #include "nvs.h"
+#include "installer.h"
 
 /*
  * Overwrite guard (detection only): each in-app OTA updater writes to the
@@ -127,9 +128,14 @@ static void scan_one(int i, basecamp_slot_t *s)
     s->generic_desc = is_generic(&s->desc);
     check_baseline(i, s, digest);
 
+    inst_get_tag(i, s->tag, sizeof(s->tag));
+
     if (s->generic_desc) {
-        /* Keep the configured name; prefer a configured version label. */
-        if (s_cfg_versions[i][0]) {
+        /* Keep the configured name. Version: the release tag the launcher
+         * installed, else the configured label, else the descriptor. */
+        if (s->tag[0]) {
+            strlcpy(s->version, s->tag, sizeof(s->version));
+        } else if (s_cfg_versions[i][0]) {
             snprintf(s->version, sizeof(s->version), "%s*", s_cfg_versions[i]);
         } else {
             strlcpy(s->version, s->desc.version, sizeof(s->version));

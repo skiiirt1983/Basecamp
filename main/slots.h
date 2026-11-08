@@ -13,6 +13,7 @@ typedef struct {
     char name[32];                /* label to show */
     char version[40];             /* version to show */
     char detail[48];              /* small text: why greyed out / project name */
+    char tag[32];                 /* release tag installed by the launcher ("" if unknown) */
 } basecamp_slot_t;
 
 void slots_scan(basecamp_slot_t slots[BASECAMP_NUM_SLOTS]);

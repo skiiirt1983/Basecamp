@@ -32,4 +32,48 @@ menu "Basecamp launcher"
             When disabled, only the image header and app descriptor are checked
             (the bootloader still verifies before booting).
 
+
+    menu "App sources (GitHub releases)"
+        config BASECAMP_SLOT0_REPO
+            string "ota_0 GitHub repo (owner/repo)"
+            default "cptkirki/PrintSphere"
+        config BASECAMP_SLOT0_ASSET_PREFIX
+            string "ota_0 asset name starts with"
+            default "printsphere_ota"
+        config BASECAMP_SLOT0_ASSET_SUFFIX
+            string "ota_0 asset name ends with"
+            default ".bin"
+        config BASECAMP_SLOT0_PROJECT
+            string "ota_0 project_name must contain"
+            default "printsphere"
+
+        config BASECAMP_SLOT1_REPO
+            string "ota_1 GitHub repo (owner/repo)"
+            default "socquique/capsule-radar"
+        config BASECAMP_SLOT1_ASSET_PREFIX
+            string "ota_1 asset name starts with"
+            default "CapsuleRadar-ota.bin"
+        config BASECAMP_SLOT1_ASSET_SUFFIX
+            string "ota_1 asset name ends with"
+            default ".bin"
+        config BASECAMP_SLOT1_PROJECT
+            string "ota_1 project_name must contain"
+            default "arduino-lib-builder"
+            help
+                Capsule Radar is an Arduino build; its descriptor is generic.
+
+        config BASECAMP_SLOT2_REPO
+            string "ota_2 GitHub repo (owner/repo)"
+            default "skiiirt1983/LyricFlash"
+        config BASECAMP_SLOT2_ASSET_PREFIX
+            string "ota_2 asset name starts with"
+            default "lyricflash-ota.bin"
+        config BASECAMP_SLOT2_ASSET_SUFFIX
+            string "ota_2 asset name ends with"
+            default ".bin"
+        config BASECAMP_SLOT2_PROJECT
+            string "ota_2 project_name must contain"
+            default "lyricflash"
+    endmenu
+
 endmenu

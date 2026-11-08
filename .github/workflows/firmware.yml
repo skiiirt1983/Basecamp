@@ -1,0 +1,62 @@
+name: Basecamp firmware
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Read version
+        id: ver
+        run: |
+          VER=$(sed -n 's/^set(PROJECT_VER "\(.*\)")/\1/p' CMakeLists.txt)
+          test -n "$VER"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Basecamp $VER"
+
+      - name: Build launcher + bootloader, size, images, QEMU self-test
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.6
+          target: esp32s3
+          command: bash tools/ci_build.sh
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Basecamp-${{ steps.ver.outputs.version }}
+          path: |
+            dist/Basecamp-*.bin
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (unsuffixed version on main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(steps.ver.outputs.version, '-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          FILES="dist/Basecamp-$VER-FRESH-INSTALL-USB.bin dist/Basecamp-$VER-launcher-only.bin dist/SHA256SUMS.txt"
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            echo "v$VER exists - replacing its assets with this build of $GITHUB_SHA"
+            gh release upload "v$VER" $FILES --clobber
+          else
+            gh release create "v$VER" $FILES --target "$GITHUB_SHA" --latest \
+              --title "Basecamp $VER" \
+              --notes "Flash **Basecamp-$VER-FRESH-INSTALL-USB.bin** at **0x0** (erases everything; on first boot the launcher sets up Wi-Fi and downloads the apps). To update only the launcher and keep apps + settings, flash **Basecamp-$VER-launcher-only.bin** at **0x90000**. See README for details. Built from $GITHUB_SHA."
+          fi
+          gh release view "v$VER" --json tagName,assets --jq '.tagName, (.assets[].name)'
