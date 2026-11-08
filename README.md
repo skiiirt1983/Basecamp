@@ -183,4 +183,6 @@ esptool.py --chip esp32s3 write_flash 0x590000 new.bin
 - ✅ `tools/qemu_selftest.sh` passes: all bootloader decisions as listed above.
 - ✅ In QEMU, the bootloader verifies and loads all three real images from their own offsets. Their crash-reboot loops under emulation stay in the same slot. These aborts come from QEMU missing octal PSRAM and the display, so they say nothing about how the apps behave on the board.
 - ✅ In QEMU, the launcher slot scan reads all three real images correctly (PrintSphere v1.6.2, Capsule Radar v1.6.0\*, LyricFlash 1.0.0). It flags a corrupted image as invalid and flags a neighbour overwrite as changed.
-- ⏳ **Not yet run on the physical board.** Display, touch, AXP2101 rails and UI layout need a hardware check (Stage 1 checklist above).
+- ✅ **Confirmed on the physical board:** stage 1 (dummy apps) and stage 2 (PrintSphere, Capsule Radar, LyricFlash) flashed as single full images at 0x0, and the menu boots each app.
+  Single-image flashing: `esptool.py --chip esp32s3 -b 921600 write_flash 0x0 basecamp-stage2-apps.bin` (or Espressif Flash Download Tool, address 0x0, SPI mode DIO, 80 MHz, DoNotChgBin).
+  To build those images: `esptool.py --chip esp32s3 merge_bin --fill-flash-size 16MB -o out.bin --flash_mode dio --flash_freq 80m --flash_size 16MB` followed by the same offset/file pairs as `tools/flash.sh`.
