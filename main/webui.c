@@ -176,6 +176,7 @@ static esp_err_t h_state(httpd_req_t *req)
     char ip[16];
     cJSON_AddStringToObject(w, "ip", net_sta_ip(ip) ? ip : "");
     cJSON_AddBoolToObject(w, "ap", net_ap_active());
+    cJSON_AddStringToObject(w, "why", net_sta_state() == NET_STA_FAILED ? net_fail_text() : "");
 
     ctl_job_t job;
     ctl_job_get(&job);

@@ -193,8 +193,11 @@ static void apply_wifi_mode(void)
     snprintf(hint, sizeof(hint), "Joining %.32s ...", net_ssid());
     set_hint(hint);
     if (net_sta_start() == ESP_OK) {
-        net_sta_connect();
-        if (net_sta_wait(25000)) {
+        for (int round = 0; round < 2; round++) {          /* a slow router gets a second try */
+            net_sta_connect();
+            if (!net_sta_wait(20000)) {
+                continue;
+            }
             if (net_ap_active()) {
                 /* let the phone that just saved the network read the answer, and never cut an upload */
                 for (int i = 0; i < 120 && ctl_busy(); i++) vTaskDelay(pdMS_TO_TICKS(500));
@@ -205,8 +208,10 @@ static void apply_wifi_mode(void)
             return;
         }
     }
+    /* Could not join: keep / bring back the setup network, and say why. */
     net_ap_start();
-    snprintf(hint, sizeof(hint), "%.16s not found - join " NET_AP_SSID, net_ssid());
+    snprintf(hint, sizeof(hint), NET_AP_SSID "  -  %.12s: %s", net_ssid(),
+             net_fail_text()[0] ? net_fail_text() : "Wi-Fi not available");
     set_hint(hint);
 }
 
@@ -257,7 +262,8 @@ static bool ensure_station(void (*restore)(void *), void *ctx)
                 }
                 return true;
             }
-            snprintf(msg, sizeof(msg), "Could not connect to \"%.32s\". Check it in the web page.", net_ssid());
+            snprintf(msg, sizeof(msg), "Could not connect to \"%.32s\" (%s). Check it in the web page.", net_ssid(),
+                     net_fail_text()[0] ? net_fail_text() : "no answer");
             ui_show_wifi_setup(msg);
         } else {
             ui_show_wifi_setup(NULL);

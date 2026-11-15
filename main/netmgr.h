@@ -33,6 +33,7 @@ bool net_wait_creds(uint32_t timeout_ms);
 
 typedef enum { NET_STA_NONE, NET_STA_CONNECTING, NET_STA_CONNECTED, NET_STA_FAILED } net_sta_t;
 net_sta_t net_sta_state(void);
+const char *net_fail_text(void);            /* why the last connection attempt failed ("" if it did not) */
 void net_sta_connect(void);                 /* async; no-op when connecting/connected/no credentials */
 bool net_sta_wait(uint32_t timeout_ms);     /* true when connected */
 

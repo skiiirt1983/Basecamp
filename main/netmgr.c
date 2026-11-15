@@ -19,7 +19,7 @@ static const char *TAG = "net";
 #define BIT_GOT_IP   BIT0
 #define BIT_FAILED   BIT1
 #define BIT_CREDS    BIT2
-#define MAX_RETRY    4
+#define MAX_RETRY    12     /* quick retries per attempt; the caller's timeout bounds the total */
 #define MAX_APS      20
 
 static EventGroupHandle_t s_ev;
@@ -35,6 +35,7 @@ static int s_dns_sock = -1;
 static wifi_ap_record_t s_aps[MAX_APS];
 static uint16_t s_ap_count;
 static volatile bool s_scanning;
+static volatile int s_reason;               /* last station disconnect reason (0 = none) */
 
 /* ---------- credentials ---------- */
 
@@ -108,6 +109,8 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         if (s_sta == NET_STA_NONE || s_sta == NET_STA_FAILED) {
             return;                                   /* deliberate disconnect */
         }
+        s_reason = ((const wifi_event_sta_disconnected_t *)data)->reason;
+        ESP_LOGW(TAG, "station disconnected, reason %d (retry %d)", s_reason, s_retry);
         xEventGroupClearBits(s_ev, BIT_GOT_IP);
         if (s_retry < MAX_RETRY) {
             s_retry++;
@@ -173,9 +176,11 @@ void net_sta_connect(void)
     }
     xEventGroupClearBits(s_ev, BIT_GOT_IP | BIT_FAILED);
     s_retry = 0;
+    s_reason = 0;
     s_sta = NET_STA_CONNECTING;
     ESP_LOGI(TAG, "connecting to '%s'", s_ssid);
     if (esp_wifi_connect() != ESP_OK) {
+        s_reason = 0xFFFF;
         s_sta = NET_STA_FAILED;
         xEventGroupSetBits(s_ev, BIT_FAILED);
     }
@@ -196,6 +201,30 @@ bool net_sta_wait(uint32_t timeout_ms)
 }
 
 net_sta_t net_sta_state(void) { return s_sta; }
+
+const char *net_fail_text(void)
+{
+    static char buf[24];
+    switch (s_reason) {
+    case 0:
+        return "";
+    case WIFI_REASON_NO_AP_FOUND:
+    case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+    case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+    case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+        return "network not found";
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_AUTH_EXPIRE:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+        return "wrong password?";
+    case 0xFFFF:
+        return "radio not ready";
+    default:
+        snprintf(buf, sizeof(buf), "error %d", s_reason);
+        return buf;
+    }
+}
 
 /* ---------- scan ---------- */
 
@@ -282,6 +311,7 @@ static esp_err_t radio_start(void)
         ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "start");
         esp_wifi_set_ps(WIFI_PS_NONE);
         s_started = true;
+        vTaskDelay(pdMS_TO_TICKS(300));            /* let the driver finish starting before the first connect */
     }
     return ESP_OK;
 }

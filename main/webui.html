@@ -142,7 +142,7 @@ function render(){
  btn();
  // wifi
  const w=S.wifi,st={none:'Not connected',connecting:'Connecting...',connected:'Connected',failed:'Could not connect'}[w.st];
- let wt=w.has?'Saved network: '+w.ssid+' · '+st:'No network saved yet.';
+ let wt=w.has?'Saved network: '+w.ssid+' · '+st+(w.st==='failed'&&w.why?' ('+w.why+')':''):'No network saved yet.';
  if(w.has&&w.st==='connected'&&w.ip)wt+=' · this page: http://'+w.ip;
  wt+=w.ap?'\nThe BaseCamp-Setup network is on.':(w.has?'\nThe BaseCamp-Setup network is off: use your home Wi-Fi to reach this page.':'');
  $('#wst').textContent=wt;
