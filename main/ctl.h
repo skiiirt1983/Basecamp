@@ -23,6 +23,10 @@ void ctl_job_get(ctl_job_t *out);
 /* Metadata or slots changed: rescan and redraw the menu if it is showing. */
 void ctl_menu_changed(void);
 
+/* Wi-Fi credentials were saved or forgotten: join the home network and switch the setup
+ * network off (or bring it back when there is no usable saved network). Returns at once. */
+void ctl_wifi_changed(void);
+
 /* Upload progress on the device screen. */
 void ctl_upload_progress(int slot, int pct);
 void ctl_upload_finished(void);

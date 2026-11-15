@@ -25,7 +25,9 @@ The page checks the first four automatically and says what is wrong if a file is
 
 ### Option A: from your phone or laptop (no tools)
 
-1. Power the device. The menu shows a Wi-Fi name, **BaseCamp-Setup**.
+1. Power the device. Under the title the menu shows how to reach the page: with no home Wi-Fi saved yet
+   it is the Wi-Fi name **BaseCamp-Setup**; once a home Wi-Fi has been saved it is the device's address on
+   your network (see step 5).
 2. On your phone, join **BaseCamp-Setup**. It is an **open network with no password**. The setup page
    opens by itself; if it doesn't, open **http://192.168.4.1** in a browser.
    - If the page opened in a small "sign in to network" window and the file chooser doesn't work,
@@ -38,6 +40,11 @@ The page checks the first four automatically and says what is wrong if a file is
 
 A new app is added at the end of the list. If all three slots are full, choose which one to replace
 (you'll be asked to confirm).
+5. **Optional, recommended: save your home Wi-Fi** (card *Wi-Fi*, at the bottom of the page). The device then
+   joins your network and **switches the BaseCamp-Setup network off**. Put your phone back on your normal
+   Wi-Fi and open the address now shown under the title on the device (for example `192.168.1.57`). From
+   then on the page is always there, and GitHub downloads and updates work. If the saved network can't be
+   found at start-up, BaseCamp-Setup comes back so you can correct it.
 
 ### Option B: straight from a GitHub release
 
@@ -178,10 +185,12 @@ reset (power-on, RST, brown-out) the register is cleared and the launcher starts
 | Tapping a card returns to the menu at once | The bootloader found the image invalid. Reinstall the app. |
 | Card is grey with a **⟳ … retry** | A download failed or the image is damaged. Tap it to reinstall (GitHub apps), or use the page. |
 | Black screen after tapping | The app didn't initialise the display/power. Power-cycle to return to the menu. |
-| Page doesn't open | Join **BaseCamp-Setup** (no password), then browse to `http://192.168.4.1`. Some phones silently stay on mobile data: turn it off. |
+| Page doesn't open | No home Wi-Fi saved: join **BaseCamp-Setup** (no password), then browse to `http://192.168.4.1`. Home Wi-Fi saved: be on that same network and open the address shown under the title on the device. If the device says `… not found - join BaseCamp-Setup`, it could not find your saved network: join BaseCamp-Setup and correct it. Some phones silently stay on mobile data: turn it off. |
 
 ## 7. A word on security
 
-The setup Wi-Fi is open by design, so that nothing needs to be typed to get started, and **anyone within
-range can use the page while the menu is showing**. It switches off the moment an app starts, and
-returns only when the menu does. Don't leave the device sitting on the menu in a place you don't trust.
+The page has no password. Until a home Wi-Fi is saved, the setup network is open by design, so that
+nothing needs to be typed to get started, and **anyone within range can use the page while the menu is
+showing**. After you save your home Wi-Fi the setup network stays off and the page lives on your home
+network, where **anyone on that network can use it**. Either way it switches off the moment an app starts
+and returns only when the menu does. Don't leave the device sitting on the menu in a place you don't trust.

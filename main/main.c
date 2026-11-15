@@ -158,6 +158,86 @@ void ctl_upload_finished(void)
     show_menu();
 }
 
+/* ---------- Wi-Fi mode ---------- */
+
+/* The line under the title: the setup network, or the home network and this device's address. */
+static void set_hint(const char *text)
+{
+    ui_set_hint(text);
+    if (ui_menu_visible()) {
+        show_menu();
+    }
+}
+
+static void hint_home(void)
+{
+    char ip[16], hint[64];
+    net_sta_ip(ip);
+    snprintf(hint, sizeof(hint), "%.24s  -  %s", net_ssid(), ip[0] ? ip : "no address");
+    set_hint(hint);
+}
+
+/* Decide how the device is reachable:
+ *  - no saved Wi-Fi: the open setup network "BaseCamp-Setup";
+ *  - saved Wi-Fi that can be joined: join it and keep the setup network OFF
+ *    (the web page is then on the home network, address shown on screen);
+ *  - saved Wi-Fi that cannot be joined: the setup network comes back so it can be fixed. */
+static void apply_wifi_mode(void)
+{
+    if (!net_has_credentials()) {
+        net_ap_start();
+        set_hint(NET_AP_SSID "  -  " NET_AP_IP);
+        return;
+    }
+    char hint[64];
+    snprintf(hint, sizeof(hint), "Joining %.32s ...", net_ssid());
+    set_hint(hint);
+    if (net_sta_start() == ESP_OK) {
+        net_sta_connect();
+        if (net_sta_wait(25000)) {
+            if (net_ap_active()) {
+                /* let the phone that just saved the network read the answer, and never cut an upload */
+                for (int i = 0; i < 120 && ctl_busy(); i++) vTaskDelay(pdMS_TO_TICKS(500));
+                vTaskDelay(pdMS_TO_TICKS(2500));
+                net_ap_stop();
+            }
+            hint_home();
+            return;
+        }
+    }
+    net_ap_start();
+    snprintf(hint, sizeof(hint), "%.16s not found - join " NET_AP_SSID, net_ssid());
+    set_hint(hint);
+}
+
+static volatile bool s_wifi_busy, s_wifi_again;
+
+static void wifi_task(void *arg)
+{
+    do {
+        s_wifi_again = false;
+        apply_wifi_mode();
+    } while (s_wifi_again);
+    s_wifi_busy = false;
+    vTaskDelete(NULL);
+}
+
+static void wifi_kick(void)
+{
+    if (__atomic_exchange_n(&s_wifi_busy, true, __ATOMIC_ACQ_REL)) {
+        s_wifi_again = true;                   /* already working: run once more afterwards */
+        return;
+    }
+    if (xTaskCreate(wifi_task, "wifi", 6144, NULL, 3, NULL) != pdPASS) {
+        s_wifi_busy = false;
+    }
+}
+
+void ctl_wifi_changed(void)
+{
+    wifi_kick();
+}
+
 /* ---------- Wi-Fi gate ---------- */
 
 /* Connect to the home Wi-Fi, asking for it on screen (and in the web page) when needed.
@@ -171,6 +251,10 @@ static bool ensure_station(void (*restore)(void *), void *ctx)
             ui_status(msg);
             net_sta_connect();
             if (net_sta_wait(25000)) {
+                if (net_ap_active()) {         /* a home Wi-Fi works: the setup network is no longer needed */
+                    net_ap_stop();
+                    hint_home();
+                }
                 return true;
             }
             snprintf(msg, sizeof(msg), "Could not connect to \"%.32s\". Check it in the web page.", net_ssid());
@@ -536,6 +620,11 @@ static void footer_task(void *arg)
             snprintf(s_footer, sizeof(s_footer), "%s", usb ? "USB" : "");
         }
         ui_set_footer(s_footer);
+        /* On the home network with no setup network up: if the link was lost for good (router
+         * restarted, moved house), retry once and fall back to the setup network. */
+        if (net_has_credentials() && !net_ap_active() && net_sta_state() == NET_STA_FAILED && !ctl_busy()) {
+            wifi_kick();
+        }
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
@@ -561,16 +650,17 @@ void app_main(void)
 
     s_work = xQueueCreate(4, sizeof(work_t));
     ui_init(on_request);
-    ui_set_hint("Wi-Fi unavailable");
+    ui_set_hint("Starting Wi-Fi ...");
     show_menu();
     xTaskCreate(worker, "worker", 10240, NULL, 5, NULL);
     xTaskCreate(footer_task, "footer", 3072, NULL, 2, NULL);
 
-    /* Setup network + web page. The menu works even if this fails. */
-    if (net_ap_start() == ESP_OK && webui_start() == ESP_OK) {
-        ui_set_hint(NET_AP_SSID "  -  " NET_AP_IP);
-        show_menu();
+    /* Web page + Wi-Fi (setup network or the saved home network). The menu works even if this fails. */
+    if (net_init() == ESP_OK && webui_start() == ESP_OK) {
+        wifi_kick();
     } else {
+        ui_set_hint("Wi-Fi unavailable");
+        show_menu();
         ESP_LOGW(TAG, "Wi-Fi / web UI not available");
     }
 }

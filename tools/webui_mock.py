@@ -25,7 +25,7 @@ STATE = dict(
            slot(1, "Capsule Radar", "v1.6.0", "arduino-lib-builder", src="socquique/capsule-radar", size=3015840, st="app"),
            slot(2)],
     order=[0, 1, 2],
-    wifi=dict(has=False, ssid="", st="none"),
+    wifi=dict(has=False, ssid="", st="none", ip="", ap=True),
     job=dict(active=False, slot=-1, pct=0, text="", err="", seq=0),
     presets=[dict(name="PrintSphere", repo="cptkirki/PrintSphere", prefix="printsphere_ota", suffix=".bin", exclude="2.8c", project="printsphere", marker="esp32_s3_touch_amoled_1_75"),
              dict(name="Capsule Radar", repo="socquique/capsule-radar", prefix="CapsuleRadar-ota.bin", suffix=".bin", exclude="", project="arduino-lib-builder", marker="CO5300"),
@@ -126,9 +126,9 @@ class H(BaseHTTPRequestHandler):
                 run_job(i, j.get("name") or j["repo"].split("/")[1], j["repo"]); return self.out(200, {"ok": True})
             if u.path == "/api/wifi":
                 if len(j.get("pass", "")) not in (0,) and len(j["pass"]) < 8: return self.err(400, "Wi-Fi passwords are at least 8 characters")
-                STATE["wifi"] = dict(has=True, ssid=j["ssid"], st="connected"); return self.out(200, {"ok": True})
+                STATE["wifi"] = dict(has=True, ssid=j["ssid"], st="connected", ip="192.168.1.57", ap=False); return self.out(200, {"ok": True})
             if u.path == "/api/wifi/forget":
-                STATE["wifi"] = dict(has=False, ssid="", st="none"); return self.out(200, {"ok": True})
+                STATE["wifi"] = dict(has=False, ssid="", st="none", ip="", ap=True); return self.out(200, {"ok": True})
             if u.path == "/api/wifi/scan":
                 SCAN_UNTIL = time.time() + 1.2; return self.out(200, {"ok": True})
         self.err(404, "not found")

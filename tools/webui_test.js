@@ -113,6 +113,7 @@ const ok = (c, m) => { if (!c) { problems.push(m); console.log('FAIL:', m); } el
   ok((await msg()).includes('owner/name'), 'bad repository name rejected');
 
   // Wi-Fi
+  ok((await page.textContent('#wst')).includes('BaseCamp-Setup network is on'), 'before saving: setup network shown as on');
   await page.click('#scan');
   await page.waitForFunction(() => document.querySelectorAll('#nets option').length > 1, null, { timeout: 8000 });
   await page.selectOption('#nets', 'HomeNet');
@@ -126,6 +127,8 @@ const ok = (c, m) => { if (!c) { problems.push(m); console.log('FAIL:', m); } el
   await page.waitForTimeout(500);
   const w = await page.textContent('#wst');
   ok(w.includes('HomeNet') && w.includes('Connected'), 'Wi-Fi saved and shown as connected');
+  ok(w.includes('http://192.168.1.57') && w.includes('BaseCamp-Setup network is off'), 'after saving: setup network shown as off, home address shown');
+  ok((await msg()).includes('switches off'), 'save message explains the setup network goes away');
   await page.screenshot({ path: SP + '/shots/5_wifi.png', fullPage: true });
 
   // XSS: a hostile app name is rendered as text, not markup

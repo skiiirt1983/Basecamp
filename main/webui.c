@@ -173,6 +173,9 @@ static esp_err_t h_state(httpd_req_t *req)
     cJSON_AddBoolToObject(w, "has", net_has_credentials());
     cJSON_AddStringToObject(w, "ssid", net_ssid());
     cJSON_AddStringToObject(w, "st", st[net_sta_state()]);
+    char ip[16];
+    cJSON_AddStringToObject(w, "ip", net_sta_ip(ip) ? ip : "");
+    cJSON_AddBoolToObject(w, "ap", net_ap_active());
 
     ctl_job_t job;
     ctl_job_get(&job);
@@ -460,8 +463,9 @@ static esp_err_t h_wifi(httpd_req_t *req)
     if (!ssid[0]) return send_err(req, "400 Bad Request", "network name is empty");
     if (pass[0] && strlen(pass) < 8) return send_err(req, "400 Bad Request", "Wi-Fi passwords are at least 8 characters");
     if (net_set_credentials(ssid, pass) != ESP_OK) return send_err(req, "500 Internal Server Error", "could not save");
-    net_sta_connect();
-    return send_ok(req);
+    esp_err_t rc = send_ok(req);                      /* answer first: the setup network may go away */
+    ctl_wifi_changed();
+    return rc;
 }
 
 static esp_err_t h_wifi_forget(httpd_req_t *req)
@@ -470,7 +474,9 @@ static esp_err_t h_wifi_forget(httpd_req_t *req)
     if (!j) return ESP_OK;
     cJSON_Delete(j);
     net_forget_credentials();
-    return send_ok(req);
+    esp_err_t rc = send_ok(req);
+    ctl_wifi_changed();
+    return rc;
 }
 
 static esp_err_t h_scan_post(httpd_req_t *req)
@@ -511,6 +517,10 @@ static esp_err_t h_root(httpd_req_t *req)
 /* Anything else (OS captive-portal probes included) -> redirect to the page. */
 static esp_err_t h_404(httpd_req_t *req, httpd_err_code_t err)
 {
+    if (!net_ap_active()) {                           /* on the home network there is no captive portal */
+        httpd_resp_send_404(req);
+        return ESP_OK;
+    }
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", "http://" NET_AP_IP "/");
     return httpd_resp_send(req, NULL, 0);

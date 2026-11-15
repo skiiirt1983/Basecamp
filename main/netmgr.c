@@ -23,7 +23,7 @@ static const char *TAG = "net";
 #define MAX_APS      20
 
 static EventGroupHandle_t s_ev;
-static bool s_inited, s_ap_up;
+static bool s_inited, s_ap_up, s_started;
 static volatile net_sta_t s_sta = NET_STA_NONE;
 static volatile int s_retry;
 static char s_ssid[33], s_pass[65];
@@ -158,7 +158,7 @@ esp_err_t net_init(void)
 
 void net_sta_connect(void)
 {
-    if (!s_ap_up || !net_has_credentials() || s_sta == NET_STA_CONNECTED || s_sta == NET_STA_CONNECTING) {
+    if (!s_started || !net_has_credentials() || s_sta == NET_STA_CONNECTED || s_sta == NET_STA_CONNECTING) {
         return;
     }
     wifi_config_t wc = {0};
@@ -201,7 +201,7 @@ net_sta_t net_sta_state(void) { return s_sta; }
 
 esp_err_t net_scan_start(void)
 {
-    if (!s_ap_up) return ESP_ERR_INVALID_STATE;
+    if (!s_started) return ESP_ERR_INVALID_STATE;
     if (s_scanning) return ESP_OK;
     wifi_scan_config_t sc = {.show_hidden = false};
     s_scanning = true;
@@ -276,6 +276,23 @@ out:
 
 /* ---------- access point ---------- */
 
+static esp_err_t radio_start(void)
+{
+    if (!s_started) {
+        ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "start");
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        s_started = true;
+    }
+    return ESP_OK;
+}
+
+esp_err_t net_sta_start(void)
+{
+    ESP_RETURN_ON_ERROR(net_init(), TAG, "init");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(s_ap_up ? WIFI_MODE_APSTA : WIFI_MODE_STA), TAG, "mode");
+    return radio_start();
+}
+
 esp_err_t net_ap_start(void)
 {
     ESP_RETURN_ON_ERROR(net_init(), TAG, "init");
@@ -290,14 +307,42 @@ esp_err_t net_ap_start(void)
     ap.ap.authmode = WIFI_AUTH_OPEN;                         /* open by design: no password */
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap), TAG, "ap cfg");
-    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "start");
-    esp_wifi_set_ps(WIFI_PS_NONE);
+    ESP_RETURN_ON_ERROR(radio_start(), TAG, "start");
     s_ap_up = true;
-
     s_dns_run = true;
-    xTaskCreate(dns_task, "dns", 3072, NULL, 4, &s_dns_task);
+    if (!s_dns_task) {
+        xTaskCreate(dns_task, "dns", 3072, NULL, 4, &s_dns_task);
+    }
     ESP_LOGI(TAG, "open network '%s' up, web page at http://%s", NET_AP_SSID, NET_AP_IP);
     return ESP_OK;
+}
+
+void net_ap_stop(void)
+{
+    if (!s_ap_up) {
+        return;
+    }
+    s_dns_run = false;
+    for (int i = 0; i < 30 && s_dns_task; i++) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    esp_wifi_set_mode(WIFI_MODE_STA);                        /* the station link stays up */
+    s_ap_up = false;
+    ESP_LOGI(TAG, "setup network off");
+}
+
+bool net_ap_active(void) { return s_ap_up; }
+
+bool net_sta_ip(char out[16])
+{
+    out[0] = 0;
+    esp_netif_t *n = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip;
+    if (!n || esp_netif_get_ip_info(n, &ip) != ESP_OK || ip.ip.addr == 0) {
+        return false;
+    }
+    snprintf(out, 16, IPSTR, IP2STR(&ip.ip));
+    return true;
 }
 
 void net_shutdown(void)
@@ -314,4 +359,5 @@ void net_shutdown(void)
     esp_wifi_disconnect();
     esp_wifi_stop();
     s_ap_up = false;
+    s_started = false;
 }

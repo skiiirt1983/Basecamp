@@ -36,6 +36,7 @@ label{display:block;font-size:12.5px;color:var(--dim);margin:10px 0 4px}
 #prev i{position:absolute;left:50%;width:70%;height:20%;transform:translate(-50%,-50%);border:2px solid;border-radius:20px;font:600 9px/1 system-ui;display:flex;align-items:center;justify-content:center;font-style:normal;overflow:hidden;white-space:nowrap;padding:0 8px}
 .pv{display:flex;gap:14px;align-items:center}
 details summary{cursor:pointer;color:var(--dim);font-size:13px;margin-top:10px}
+#wst{white-space:pre-line}
 a{color:var(--acc)}[hidden]{display:none!important}
 </style></head><body><main>
 <h1>BASECAMP <span class="sub" id="ver"></span></h1>
@@ -83,7 +84,7 @@ a{color:var(--acc)}[hidden]{display:none!important}
  <label>or type the network name</label><input id="ssid" maxlength="32" autocapitalize="none" autocorrect="off">
  <label>Password</label><input id="pass" type="password" maxlength="64" autocomplete="off">
  <div style="margin-top:12px;display:flex;gap:8px"><button class="pri" id="wsave">Save &amp; connect</button><button id="wforget">Forget</button></div>
- <div class="meta" style="margin-top:8px">Only needed for GitHub downloads and updates. Uploading from this page works without it. 2.4&nbsp;GHz WPA/WPA2 networks only.</div>
+ <div class="meta" style="margin-top:8px">Needed for GitHub downloads and updates. Once saved, the device joins this network and the BaseCamp-Setup network switches off; this page is then at the address shown on the device. If the network cannot be found when the device starts, BaseCamp-Setup comes back. 2.4&nbsp;GHz WPA/WPA2 only.</div>
 </div>
 <div class="meta">Adding your own app: see <b>docs/ADD_YOUR_OWN_APP.md</b> in the project repository.</div>
 </main>
@@ -98,8 +99,8 @@ async function api(p,body){
  if(!r.ok)throw Object.assign(new Error(j.error||'HTTP '+r.status),{data:j});
  return j}
 let S=null,mode='up',openEdit=-1,busyUp=false,lastSeq=-1;
-function say(t,bad){const c=$('#msgc');$('#msg').textContent=t;$('#msg').className=bad?'bad':'ok';c.hidden=!t;
- clearTimeout(say.t);if(t)say.t=setTimeout(()=>c.hidden=true,9000)}
+function say(t,bad,ms){const c=$('#msgc');$('#msg').textContent=t;$('#msg').className=bad?'bad':'ok';c.hidden=!t;
+ clearTimeout(say.t);if(t)say.t=setTimeout(()=>c.hidden=true,ms||9000)}
 const mb=n=>(n/1048576).toFixed(2)+' MB';
 
 async function refresh(){
@@ -141,7 +142,10 @@ function render(){
  btn();
  // wifi
  const w=S.wifi,st={none:'Not connected',connecting:'Connecting...',connected:'Connected',failed:'Could not connect'}[w.st];
- $('#wst').textContent=w.has?'Saved network: '+w.ssid+' · '+st:'No network saved yet.';
+ let wt=w.has?'Saved network: '+w.ssid+' · '+st:'No network saved yet.';
+ if(w.has&&w.st==='connected'&&w.ip)wt+=' · this page: http://'+w.ip;
+ wt+=w.ap?'\nThe BaseCamp-Setup network is on.':(w.has?'\nThe BaseCamp-Setup network is off: use your home Wi-Fi to reach this page.':'');
+ $('#wst').textContent=wt;
  $('#wst').className='meta '+(w.st==='connected'?'ok':w.st==='failed'?'bad':'');
  // job banner
  const j=S.job,bn=$('#banner');
@@ -201,7 +205,7 @@ $('#scan').onclick=async()=>{
  $('#scan').disabled=false};
 $('#nets').onchange=()=>{if($('#nets').value)$('#ssid').value=$('#nets').value};
 $('#wsave').onclick=async()=>{const s=$('#ssid').value.trim();if(!s){say('Enter or choose a network.',1);return}
- try{await api('/api/wifi',{ssid:s,pass:$('#pass').value});say('Saved. Connecting - the setup network may blink for a moment.');$('#pass').value='';await refresh()}
+ try{await api('/api/wifi',{ssid:s,pass:$('#pass').value});say('Saved. The device is joining '+s+'. When it has connected, the BaseCamp-Setup network switches off: put your phone back on your normal Wi-Fi and open the address shown on the device screen.',0,20000);$('#pass').value='';await refresh()}
  catch(e){say(e.message,1)}};
 $('#wforget').onclick=async()=>{try{await api('/api/wifi/forget',{});await refresh()}catch(e){say(e.message,1)}};
 

@@ -8,9 +8,10 @@ Every power-on shows a round touch menu with **the apps you have installed (up t
 boots it. The app's own restarts, crashes and deep-sleep wake-ups stay inside that app. The next
 power-on (or a press of the RST button) returns to the menu.
 
-The apps are not built in. Add them from a phone or laptop through the open Wi-Fi **BaseCamp-Setup**
-that the menu provides (upload a `.bin`, or download it from a GitHub release), and arrange their
-order on a web page. **Your own apps work too:** see [docs/ADD_YOUR_OWN_APP.md](docs/ADD_YOUR_OWN_APP.md).
+The apps are not built in. Add them from a phone or laptop through a web page the menu provides (upload a
+`.bin`, or download it from a GitHub release), and arrange their order there. Until you save your home
+Wi-Fi, the page is on an open setup network, **BaseCamp-Setup**; afterwards the device joins your Wi-Fi and
+the setup network stays off. **Your own apps work too:** see [docs/ADD_YOUR_OWN_APP.md](docs/ADD_YOUR_OWN_APP.md).
 
 ```
 power-on ─► custom bootloader ─► cold reset? ──yes──► launcher (factory) ──tap──► STORE0 = slot, esp_restart()
@@ -58,13 +59,26 @@ upgrade from an earlier version: it recognises apps installed by 0.2.x and keeps
 tap it to reinstall. Long-press an amber **⚠ changed** card to accept its new content (see
 [Known risks](#known-risks-and-caveats)).
 
-**The web page** (join **BaseCamp-Setup**, then it opens, or `http://192.168.4.1`):
+**The web page** (join **BaseCamp-Setup**, then it opens, or `http://192.168.4.1`; once your home Wi-Fi is
+saved, open the address shown under the title on the device):
 - list of the apps with name, version, size and slot; a **round preview** of the menu;
 - **▲ ▼** to change the order, **✎** to rename or pick a colour, **⟳** to update from GitHub, **✕** to remove;
 - **Add an app:** upload a `.bin` (checked before anything is erased), or install from a GitHub repo;
-- **Wi-Fi for GitHub downloads:** pick or type your network.
+- **Wi-Fi:** pick or type your home network.
 
-Changes show on the device straight away. The setup network switches off when an app starts.
+Changes show on the device straight away.
+
+**Wi-Fi modes.** The line under the title on the menu says which one is active:
+- **No Wi-Fi saved:** the open setup network **BaseCamp-Setup** is on (`BaseCamp-Setup - 192.168.4.1`).
+- **Home Wi-Fi saved:** when you press *Save & connect*, the device joins that network and, as soon as it
+  has, **switches the setup network off**. The line then shows your network and the device's address
+  (for example `HomeNet - 192.168.1.57`); put your phone back on your normal Wi-Fi and open that address.
+  The same happens at every start-up, so the page is always on your home network.
+- **Saved network not found at start-up** (about 20 s, for example after moving house): the line shows
+  `HomeNet not found - join BaseCamp-Setup` and the setup network comes back so you can correct it.
+  *Forget* on the page also brings it back.
+
+Everything switches off when an app starts.
 
 ## Layout
 
@@ -212,16 +226,17 @@ right after an install.
 - **Changing the partition table.** The table is fixed.
 
 ### Other caveats
-- **The setup Wi-Fi is open (no password) by design.** While the menu is showing, anyone within range can
-  use the page, including uploading firmware. It is off whenever an app is running. Don't leave the
-  device on the menu somewhere you don't trust.
+- **The page has no password.** Until a home Wi-Fi is saved, the setup network is open by design, so anyone
+  within range can use the page (including uploading firmware) while the menu is showing. After that,
+  the page is on your home network instead: anyone on that network can use it. In both cases it is off
+  whenever an app is running, so don't leave the device sitting on the menu somewhere you don't trust.
 - **Three apps, 4 MB each.** The partition table is fixed.
 - **A replaced app is gone.** Uploading or downloading into an occupied slot erases it as soon as the
   new file has passed its header check, and there is no spare slot to fall back to. If the transfer then
   fails, the slot is left empty; a GitHub app keeps a grey "retry" card.
 - **The FRESH-INSTALL image wipes everything,** including every app's settings (Wi-Fi credentials, tokens, preferences) and the launcher's Wi-Fi. To keep settings, flash the launcher-only image at 0x90000 or update through **Updates**.
 - **Shared NVS.** All apps and the launcher share one `nvs` partition. Namespaces usually differ, but IDF Wi-Fi config (`nvs.net80211`) is shared. An app that relies on stored Wi-Fi config may see another app's network.
-- **Wi-Fi:** 2.4 GHz WPA/WPA2 (or open) networks only. WPA3-only networks are not supported, to keep the launcher under 1 MB. While the device is connected to your router for a GitHub download, the setup network follows the router's channel, so a phone on it may reconnect once. Unauthenticated GitHub API calls are limited to 60 per hour per IP address.
+- **Wi-Fi:** 2.4 GHz WPA/WPA2 (or open) networks only. WPA3-only networks are not supported, to keep the launcher under 1 MB. Unauthenticated GitHub API calls are limited to 60 per hour per IP address.
 - **Crash loops.** An app that crash-loops stays in that app; this is how "restarts stay in the app" works. A power cycle or the RST button always returns to the menu.
 - **Flash mode.** The launcher uses QIO like Waveshare's demos. Espressif QEMU mis-emulates the app-side QIO read. If a board ever shows every slot as damaged after an install, rebuild with `CONFIG_ESPTOOLPY_FLASHMODE_DIO=y`.
 
@@ -229,4 +244,4 @@ right after an install.
 - ✅ **On hardware (0.1.x–0.2.x):** the menu boots each of three apps; the dummy-app restart/crash/sleep checks pass; a power cycle returns to the menu; first-boot Wi-Fi setup and GitHub installs worked (including the 504 retry fix).
 - ✅ **CI on every push:** host tests, the build (launcher under 1 MB), packaging checks, both QEMU self-tests.
 - ✅ **Off-device checks (0.3.0):** the web page against a device mock (25 behaviours), every launcher screen rendered with the real UI code, slot scan of the three real app images in QEMU.
-- ⏳ **Not yet tested on hardware (0.3.0):** the open access point and captive portal, the web server (uploads over Wi-Fi), the dynamic menu on the real display, and the launcher-only upgrade from 0.2.x.
+- ⏳ **Not yet tested on hardware (0.3.x):** the open access point and captive portal, the web server (uploads over Wi-Fi), the hand-over from the setup network to the home network, the dynamic menu on the real display, and the launcher-only upgrade from 0.2.x.

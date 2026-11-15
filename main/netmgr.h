@@ -5,16 +5,23 @@
 
 /*
  * Launcher Wi-Fi.
- *  - Access point "BaseCamp-Setup" (open, no password) is up while the menu is
- *    shown. A catch-all DNS makes phones open the web page by themselves.
- *  - The station side (your router, for GitHub downloads) connects only on
- *    demand. Credentials live in NVS namespace "basecamp" (ssid, pass).
+ *  - Until a home Wi-Fi is saved, the access point "BaseCamp-Setup" (open, no
+ *    password) is up while the menu is shown. A catch-all DNS makes phones open
+ *    the web page by themselves.
+ *  - Once a home Wi-Fi is saved the device joins it and the access point stays
+ *    off; the web page is then served on the home network. If the saved network
+ *    cannot be joined, the access point comes back.
+ *  - Credentials live in NVS namespace "basecamp" (ssid, pass).
  */
 #define NET_AP_SSID "BaseCamp-Setup"
 #define NET_AP_IP   "192.168.4.1"
 
 esp_err_t net_init(void);
-esp_err_t net_ap_start(void);
+esp_err_t net_sta_start(void);              /* start the radio for the station side only (no setup network) */
+esp_err_t net_ap_start(void);               /* setup network + captive DNS (keeps a running station link) */
+void net_ap_stop(void);                     /* setup network off; the station link stays */
+bool net_ap_active(void);
+bool net_sta_ip(char out[16]);              /* IP address on the home network, false if none */
 void net_shutdown(void);                    /* radio off, before handing over to an app */
 
 bool net_has_credentials(void);
