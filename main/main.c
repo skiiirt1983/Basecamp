@@ -1,17 +1,21 @@
 /*
  * SLOPEFORM / Project Basecamp - factory launcher.
  *
- * Shows the three OTA slots; tapping an installed one stores the selection in
- * RTC_CNTL_STORE0_REG and restarts (the custom bootloader then boots that slot
- * until the next cold reset). Empty slots are installed straight from the
- * apps' GitHub releases; on a fresh install (all slots empty) this starts
- * automatically, with a captive Wi-Fi setup portal if no Wi-Fi is stored.
+ * The menu shows whatever is installed in the three app slots (ota_0..2), in
+ * the order chosen on the web page. Tapping an app stores the selection in
+ * RTC_CNTL_STORE0_REG and restarts: the custom bootloader then boots that slot
+ * until the next cold reset.
+ *
+ * While the menu is up, an open Wi-Fi "BaseCamp-Setup" serves a web page
+ * (webui.c) to upload / order / rename / remove apps. Apps can also be
+ * installed from GitHub releases (installer.c) over the home Wi-Fi.
  */
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_app_desc.h"
@@ -20,257 +24,518 @@
 #include "axp2101.h"
 #include "basecamp_bootsel.h"
 #include "slots.h"
+#include "meta.h"
 #include "ui.h"
 #include "netmgr.h"
+#include "webui.h"
 #include "installer.h"
+#include "ctl.h"
 
 static const char *TAG = "launcher";
-static basecamp_slot_t s_slots[BASECAMP_NUM_SLOTS];
-static QueueHandle_t s_jobs;
-static volatile bool s_busy;
 
-typedef struct {
-    ui_req_t req;
-    int arg;
-} job_t;
-
-#define ALL_SLOTS ((1u << BASECAMP_NUM_SLOTS) - 1)
 #define INSTALL_ATTEMPTS 4
 
-static void restart_to_menu(void)
+typedef struct {
+    int slot;
+    inst_source_t src;
+    char name[32];
+    uint32_t color;
+} inst_job_t;
+
+typedef enum { W_REQ, W_BATCH } work_kind_t;
+typedef struct {
+    work_kind_t kind;
+    ui_req_t req;
+    int arg;
+    bool update_mode;
+} work_t;
+
+static QueueHandle_t s_work;
+static volatile bool s_busy;
+static inst_job_t s_batch[APPS_MAX];
+static int s_nbatch;
+static inst_job_t s_failed[APPS_MAX];
+static int s_nfailed;
+static ctl_job_t s_job;
+static SemaphoreHandle_t s_job_mtx;
+static char s_footer[48];
+static int s_up_slot = -1;
+
+/* ---------- busy state / job status (ctl.h) ---------- */
+
+bool ctl_begin(void)
 {
-    net_shutdown();
-    board_display_off();
-    basecamp_bootsel_clear();
-    esp_restart();
+    return !__atomic_exchange_n(&s_busy, true, __ATOMIC_ACQ_REL);
 }
 
-/* UI requests arrive on the LVGL task: hand them to the worker. */
-static void on_request(ui_req_t req, int arg)
+void ctl_end(void)
 {
-    if (req == UI_REQ_RESTART) {
-        restart_to_menu(); /* also cancels anything in progress */
-    }
-    if (s_busy) {
-        return;
-    }
-    s_busy = true;
-    job_t j = {req, arg};
-    if (xQueueSend(s_jobs, &j, 0) != pdTRUE) {
-        s_busy = false;
+    __atomic_store_n(&s_busy, false, __ATOMIC_RELEASE);
+}
+
+bool ctl_busy(void)
+{
+    return s_busy;
+}
+
+void ctl_job_get(ctl_job_t *out)
+{
+    xSemaphoreTake(s_job_mtx, portMAX_DELAY);
+    *out = s_job;
+    xSemaphoreGive(s_job_mtx);
+}
+
+static void job_begin(void)
+{
+    xSemaphoreTake(s_job_mtx, portMAX_DELAY);
+    s_job.active = true;
+    s_job.slot = -1;
+    s_job.pct = 0;
+    s_job.text[0] = s_job.error[0] = 0;
+    xSemaphoreGive(s_job_mtx);
+}
+
+static void job_set(int slot, int pct, const char *text)
+{
+    xSemaphoreTake(s_job_mtx, portMAX_DELAY);
+    s_job.slot = slot;
+    s_job.pct = pct;
+    if (text) strlcpy(s_job.text, text, sizeof(s_job.text));
+    xSemaphoreGive(s_job_mtx);
+}
+
+static void job_end(const char *err)
+{
+    xSemaphoreTake(s_job_mtx, portMAX_DELAY);
+    s_job.active = false;
+    strlcpy(s_job.error, err ? err : "", sizeof(s_job.error));
+    s_job.seq++;
+    xSemaphoreGive(s_job_mtx);
+}
+
+/* ---------- menu ---------- */
+
+static void refresh_snapshot(void)
+{
+    basecamp_slot_t all[APPS_MAX];
+    uint8_t ord[APPS_MAX];
+    slots_get_all(all);
+    meta_get_order(ord);
+    ui_set_apps(all, ord);
+}
+
+static void show_menu(void)
+{
+    refresh_snapshot();
+    ui_show_menu();
+    ui_set_footer(s_footer);
+}
+
+void ctl_menu_changed(void)
+{
+    if (ui_menu_visible()) {
+        show_menu();
+    } else {
+        refresh_snapshot();
     }
 }
 
-/* ---------- network gate ---------- */
-
-static bool ensure_network(void)
+void ctl_upload_progress(int slot, int pct)
 {
-    char notice[96] = "";
-    if (net_init() != ESP_OK) {
-        ui_status("Wi-Fi failed to start");
-        return false;
+    if (s_up_slot != slot) {
+        const char *names[APPS_MAX] = {"Uploading", "Uploading", "Uploading"};
+        uint32_t colors[APPS_MAX] = {meta_get_color(0), meta_get_color(1), meta_get_color(2)};
+        ui_show_progress("RECEIVING", 1u << slot, names, colors);
+        ui_status("Receiving the app from your phone ...");
+        s_up_slot = slot;
     }
-    if (net_has_credentials()) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Connecting to %s ...", net_ssid());
-        ui_status(msg);
-        if (net_connect(20000)) {
-            return true;
+    ui_progress_slot(slot, pct, "receiving", false);
+}
+
+void ctl_upload_finished(void)
+{
+    s_up_slot = -1;
+    show_menu();
+}
+
+/* ---------- Wi-Fi gate ---------- */
+
+/* Connect to the home Wi-Fi, asking for it on screen (and in the web page) when needed.
+ * `restore` redraws the screen that was showing before. */
+static bool ensure_station(void (*restore)(void *), void *ctx)
+{
+    for (;;) {
+        if (net_has_credentials()) {
+            char msg[112];
+            snprintf(msg, sizeof(msg), "Connecting to %.32s ...", net_ssid());
+            ui_status(msg);
+            net_sta_connect();
+            if (net_sta_wait(25000)) {
+                return true;
+            }
+            snprintf(msg, sizeof(msg), "Could not connect to \"%.32s\". Check it in the web page.", net_ssid());
+            ui_show_wifi_setup(msg);
+        } else {
+            ui_show_wifi_setup(NULL);
         }
-        snprintf(notice, sizeof(notice), "Could not connect to \"%s\". Choose a network again.", net_ssid());
+        net_wait_creds(UINT32_MAX);            /* "Cancel" restarts the launcher */
+        if (restore) restore(ctx);
     }
-    ui_show_wifi_setup(notice[0] ? notice : NULL);
-    if (net_portal_start() != ESP_OK) {
-        ui_status("Could not start the setup network");
-        return false;
-    }
-    net_portal_wait(UINT32_MAX);        /* Cancel restarts the launcher */
-    vTaskDelay(pdMS_TO_TICKS(2500));    /* let the phone receive the "Connected" page */
-    net_portal_stop();
-    return net_is_connected() || net_connect(20000);
 }
 
-/* ---------- install ---------- */
+/* ---------- installs ---------- */
 
 static void progress_cb(int slot, int pct, void *ctx)
 {
     ui_progress_slot(slot, pct, (const char *)ctx, false);
+    job_set(slot, pct, (const char *)ctx);
 }
 
-static void do_install(uint32_t mask, bool update)
+typedef struct {
+    const char *title;
+    uint32_t mask;
+    const char *names[APPS_MAX];
+    uint32_t colors[APPS_MAX];
+} progress_ctx_t;
+
+static void restore_progress(void *c)
 {
-    const char *ttl = update ? "UPDATING" : "INSTALLING";
-    ui_show_progress(ttl, mask);
-    if (!ensure_network()) {
-        ui_action_button("Menu", UI_REQ_RESTART, 0);
+    progress_ctx_t *p = c;
+    ui_show_progress(p->title, p->mask, p->names, p->colors);
+}
+
+static void store_meta(const inst_job_t *j, const char *tag)
+{
+    meta_clear_slot(j->slot);                  /* new image, new baseline; drops the old app's data */
+    meta_set_name(j->slot, j->name);
+    meta_set_color(j->slot, j->color);
+    meta_set_src(j->slot, &j->src);
+    if (tag) meta_set_tag(j->slot, tag);
+}
+
+static void do_batch(bool update)
+{
+    progress_ctx_t pc = {.title = update ? "UPDATING" : "INSTALLING", .names = {"", "", ""}};
+    for (int i = 0; i < s_nbatch; i++) {
+        int s = s_batch[i].slot;
+        pc.mask |= 1u << s;
+        pc.names[s] = s_batch[i].name;
+        pc.colors[s] = s_batch[i].color;
+    }
+    job_begin();
+    job_set(s_batch[0].slot, 0, "connecting to Wi-Fi");
+    restore_progress(&pc);
+    s_nfailed = 0;
+
+    if (!ensure_station(restore_progress, &pc)) {
+        job_end("Wi-Fi not connected");
         return;
     }
-    ui_show_progress(ttl, mask); /* the Wi-Fi portal may have replaced it */
+    restore_progress(&pc);
     ui_status(update ? "Updates keep each app's settings." : "Downloading from GitHub ...");
 
-    uint32_t failed = 0;
     char first_err[160] = "";
-    for (int i = 0; i < BASECAMP_NUM_SLOTS; i++) {
-        if (!((mask >> i) & 1)) {
-            continue;
-        }
+    for (int i = 0; i < s_nbatch; i++) {
+        const inst_job_t *j = &s_batch[i];
         char err[96] = "";
         static inst_release_t rel;
         esp_err_t e = ESP_FAIL;
+        bool erased = false;
+        basecamp_slot_t old;
+        slots_get(j->slot, &old);
+        bool was_new = !slots_has_card(&old);
+
         /* GitHub hiccups (5xx, timeouts, dropped connections) are retried
          * automatically; wrong app / board / size errors are not. */
         for (int attempt = 1; attempt <= INSTALL_ATTEMPTS; attempt++) {
             char state[48];
             if (attempt > 1) {
                 snprintf(state, sizeof(state), "retry %d/%d in %ds", attempt, INSTALL_ATTEMPTS, 3 * (attempt - 1));
-                ui_progress_slot(i, 0, state, false);
+                ui_progress_slot(j->slot, 0, state, false);
+                job_set(j->slot, 0, state);
                 vTaskDelay(pdMS_TO_TICKS(3000 * (attempt - 1)));
             }
-            ui_progress_slot(i, 0, "checking GitHub", false);
-            e = inst_fetch_latest(i, &rel, err, sizeof(err));
+            ui_progress_slot(j->slot, 0, "checking GitHub", false);
+            job_set(j->slot, 0, "checking GitHub");
+            e = inst_fetch_latest(&j->src, &rel, err, sizeof(err));
             if (e == ESP_OK) {
-                snprintf(state, sizeof(state), "downloading %s", rel.tag);
-                ui_progress_slot(i, 0, state, false);
-                e = inst_install(i, &rel, progress_cb, state, err, sizeof(err));
+                snprintf(state, sizeof(state), "%.20s", rel.tag);
+                ui_progress_slot(j->slot, 0, state, false);
+                e = inst_install(j->slot, &j->src, &rel, progress_cb, state, &erased, err, sizeof(err));
             }
             if (e != ESP_ERR_TIMEOUT) {
                 break;
             }
         }
         if (e == ESP_OK) {
-            ui_progress_slot(i, 100, "installed", false);
+            store_meta(j, rel.tag);
+            if (was_new) meta_move_to_end(j->slot);
+            ui_progress_slot(j->slot, 100, "installed", false);
         } else {
-            failed |= 1u << i;
-            ui_progress_slot(i, -1, err, true);
-            if (!first_err[0]) {
-                snprintf(first_err, sizeof(first_err), "%.31s: %.95s", s_slots[i].name, err);
-            }
+            if (erased) store_meta(j, NULL);   /* slot is blank now: keep a grey "retry" card */
+            s_failed[s_nfailed++] = *j;
+            ui_progress_slot(j->slot, -1, err, true);
+            if (!first_err[0]) snprintf(first_err, sizeof(first_err), "%.31s: %.95s", j->name, err);
         }
+        slots_scan_one(j->slot);
     }
 
-    if (!failed) {
-        ui_status("All done - back to the menu");
-        vTaskDelay(pdMS_TO_TICKS(1500));
-        restart_to_menu();
+    refresh_snapshot();
+    if (!s_nfailed) {
+        job_end(NULL);
+        ui_status("All done");
+        vTaskDelay(pdMS_TO_TICKS(1200));
+        show_menu();
+        return;
     }
+    job_end(first_err);
     ui_status(first_err);
-    ui_action_pair("Retry", UI_REQ_INSTALL, failed, "Menu", UI_REQ_RESTART, 0);
+    ui_action_pair("Retry", UI_REQ_RETRY_BATCH, 0, "Menu", UI_REQ_MENU, 0);
 }
 
-/* ---------- updates ---------- */
+/* ---------- updates check ---------- */
 
 static const char *strip_v(const char *s)
 {
     return (s[0] == 'v' || s[0] == 'V') ? s + 1 : s;
 }
 
+typedef struct {
+    int n;
+    int slot[APPS_MAX];
+    const char *names[APPS_MAX];
+    uint32_t colors[APPS_MAX];
+    basecamp_slot_t snap[APPS_MAX];
+} upd_ctx_t;
+
+static void restore_updates(void *c)
+{
+    upd_ctx_t *u = c;
+    ui_show_updates(u->n, u->names, u->colors);
+}
+
 static void do_check_updates(void)
 {
-    ui_show_updates();
-    if (!ensure_network()) {
-        ui_action_button("Back", UI_REQ_RESTART, 0);
+    static upd_ctx_t u;
+    memset(&u, 0, sizeof u);
+    slots_get_all(u.snap);
+    uint8_t ord[APPS_MAX], list[APPS_MAX];
+    meta_get_order(ord);
+    unsigned mask = 0;
+    for (int i = 0; i < APPS_MAX; i++) {
+        inst_source_t src;
+        if (u.snap[i].state == SLOT_APP && meta_get_src(i, &src)) mask |= 1u << i;
+    }
+    u.n = apps_build_order(ord, mask, list);
+    for (int k = 0; k < u.n; k++) {
+        u.slot[k] = list[k];
+        u.names[k] = u.snap[list[k]].name;
+        u.colors[k] = u.snap[list[k]].color;
+    }
+    ui_show_updates(u.n, u.names, u.colors);
+    if (u.n == 0) {
+        ui_status("No installed app has a GitHub source, so there is nothing to update here.");
+        ui_action_button("Back", UI_REQ_MENU, 0);
         return;
     }
-    ui_show_updates();
+    if (!ensure_station(restore_updates, &u)) {
+        return;
+    }
+    restore_updates(&u);
     ui_status("Checking GitHub releases ...");
-    uint32_t avail = 0;
-    for (int i = 0; i < BASECAMP_NUM_SLOTS; i++) {
-        const basecamp_slot_t *s = &s_slots[i];
+
+    unsigned avail = 0;
+    for (int k = 0; k < u.n; k++) {
+        const basecamp_slot_t *s = &u.snap[u.slot[k]];
         static inst_release_t rel;
+        inst_source_t src;
         char err[96], row[140];
+        meta_get_src(u.slot[k], &src);
         esp_err_t fe = ESP_ERR_TIMEOUT;
         for (int attempt = 0; attempt < INSTALL_ATTEMPTS && fe == ESP_ERR_TIMEOUT; attempt++) {
-            if (attempt) {
-                vTaskDelay(pdMS_TO_TICKS(2000 * attempt));
-            }
-            fe = inst_fetch_latest(i, &rel, err, sizeof(err));
+            if (attempt) vTaskDelay(pdMS_TO_TICKS(2000 * attempt));
+            fe = inst_fetch_latest(&src, &rel, err, sizeof(err));
         }
         if (fe != ESP_OK) {
             snprintf(row, sizeof(row), "check failed: %.95s", err);
-            ui_updates_row(i, row, false);
+            ui_updates_row(k, row, false);
             continue;
         }
-        /* Installed version: the tag the launcher installed, else the
-         * descriptor version (not meaningful for generic Arduino builds). */
-        const char *cur = s->tag[0] ? s->tag : (s->valid && !s->generic_desc ? s->desc.version : "");
-        bool up_to_date = s->valid && cur[0] && strcmp(strip_v(cur), strip_v(rel.tag)) == 0;
-        if (!s->valid) {
-            snprintf(row, sizeof(row), "not installed -> %s", rel.tag);
-        } else if (up_to_date) {
-            snprintf(row, sizeof(row), "%s  (up to date)", cur);
+        const char *cur = s->tag[0] ? s->tag : (s->generic_desc ? "" : s->desc.version);
+        bool same = cur[0] && strcmp(strip_v(cur), strip_v(rel.tag)) == 0;
+        if (same) {
+            snprintf(row, sizeof(row), "%.40s  (up to date)", cur);
         } else {
-            snprintf(row, sizeof(row), "%s -> %s", cur[0] ? cur : "?", rel.tag);
+            snprintf(row, sizeof(row), "%.40s -> %.40s", cur[0] ? cur : "?", rel.tag);
+            avail |= 1u << u.slot[k];
         }
-        if (!up_to_date) {
-            avail |= 1u << i;
-        }
-        ui_updates_row(i, row, !up_to_date);
+        ui_updates_row(k, row, !same);
     }
     if (avail) {
         ui_status("Install updates? App settings are kept.");
-        ui_action_pair("Install", UI_REQ_INSTALL_UPDATES, avail, "Back", UI_REQ_RESTART, 0);
+        ui_action_pair("Install", UI_REQ_INSTALL_UPDATES, (int)avail, "Back", UI_REQ_MENU, 0);
     } else {
         ui_status("Everything is up to date.");
-        ui_action_button("Back", UI_REQ_RESTART, 0);
+        ui_action_button("Back", UI_REQ_MENU, 0);
     }
 }
 
-/* ---------- worker ---------- */
+/* ---------- launching ---------- */
 
 static void launch(int slot)
 {
-    ESP_LOGI(TAG, "launching ota_%d (%s %s)", slot, s_slots[slot].name, s_slots[slot].version);
-    ui_show_launching(slot);
+    basecamp_slot_t s;
+    slots_get(slot, &s);
+    ESP_LOGI(TAG, "launching ota_%d (%s %s)", slot, s.name, s.version);
+    ui_show_launching(s.name, s.color);
     vTaskDelay(pdMS_TO_TICKS(250));
+    webui_stop();
     net_shutdown();
     board_display_off();
     basecamp_bootsel_set((uint8_t)slot);
     esp_restart();
 }
 
+/* ---------- work queue ---------- */
+
+static void restart_launcher(void)
+{
+    webui_stop();
+    net_shutdown();
+    board_display_off();
+    basecamp_bootsel_clear();
+    esp_restart();
+}
+
+static void post(const work_t *w)
+{
+    if (xQueueSend(s_work, w, 0) != pdTRUE) {
+        ctl_end();
+    }
+}
+
+/* UI requests arrive on the LVGL task: hand them to the worker. */
+static void on_request(ui_req_t req, int arg)
+{
+    if (req == UI_REQ_RESTART) {
+        restart_launcher();                    /* also cancels anything in progress */
+    }
+    if (!ctl_begin()) {
+        return;
+    }
+    work_t w = {.kind = W_REQ, .req = req, .arg = arg};
+    post(&w);
+}
+
+esp_err_t ctl_start_install(int slot, const inst_source_t *src, const char *name, uint32_t color)
+{
+    if (!ctl_begin()) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_nbatch = 1;
+    s_batch[0].slot = slot;
+    s_batch[0].src = *src;
+    strlcpy(s_batch[0].name, name, sizeof(s_batch[0].name));
+    s_batch[0].color = color;
+    work_t w = {.kind = W_BATCH};
+    post(&w);
+    return ESP_OK;
+}
+
+static void batch_add(int slot, const inst_source_t *src, const char *name, uint32_t color)
+{
+    inst_job_t *j = &s_batch[s_nbatch++];
+    j->slot = slot;
+    j->src = *src;
+    strlcpy(j->name, name, sizeof(j->name));
+    j->color = color;
+}
+
+static void handle_req(const work_t *w)
+{
+    s_nbatch = 0;
+    switch (w->req) {
+    case UI_REQ_LAUNCH:
+        launch(w->arg);
+        break;
+    case UI_REQ_RETRY_SLOT: {
+        inst_source_t src;
+        basecamp_slot_t s;
+        slots_get(w->arg, &s);
+        if (meta_get_src(w->arg, &src)) {
+            batch_add(w->arg, &src, s.name, s.color);
+            do_batch(false);
+        }
+        break;
+    }
+    case UI_REQ_INSTALL_DEFAULTS: {
+        basecamp_slot_t all[APPS_MAX];
+        slots_get_all(all);
+        int k = 0;
+        for (int i = 0; i < APPS_MAX && k < INST_PRESETS; i++) {
+            if (all[i].state != SLOT_EMPTY) continue;
+            inst_source_t src;
+            char name[32];
+            inst_preset(k++, &src, name);
+            batch_add(i, &src, name, meta_get_color(i));
+        }
+        if (s_nbatch) do_batch(false);
+        break;
+    }
+    case UI_REQ_INSTALL_UPDATES:
+        for (int i = 0; i < APPS_MAX; i++) {
+            inst_source_t src;
+            basecamp_slot_t s;
+            if (!((w->arg >> i) & 1) || !meta_get_src(i, &src)) continue;
+            slots_get(i, &s);
+            batch_add(i, &src, s.name, s.color);
+        }
+        if (s_nbatch) do_batch(true);
+        break;
+    case UI_REQ_RETRY_BATCH:
+        for (int i = 0; i < s_nfailed; i++) s_batch[s_nbatch++] = s_failed[i];
+        if (s_nbatch) do_batch(false);
+        break;
+    case UI_REQ_CHECK_UPDATES:
+        do_check_updates();
+        break;
+    case UI_REQ_ACCEPT:
+        slots_accept(w->arg);
+        show_menu();
+        break;
+    case UI_REQ_MENU:
+        show_menu();
+        break;
+    default:
+        break;
+    }
+}
+
 static void worker(void *arg)
 {
-    job_t j;
+    work_t w;
     for (;;) {
-        xQueueReceive(s_jobs, &j, portMAX_DELAY);
-        switch (j.req) {
-        case UI_REQ_LAUNCH:
-            launch(j.arg);
-            break;
-        case UI_REQ_INSTALL:
-            do_install((uint32_t)j.arg & ALL_SLOTS, false);
-            break;
-        case UI_REQ_INSTALL_UPDATES:
-            do_install((uint32_t)j.arg & ALL_SLOTS, true);
-            break;
-        case UI_REQ_CHECK_UPDATES:
-            do_check_updates();
-            break;
-        case UI_REQ_ACCEPT:
-            slots_accept(&s_slots[j.arg], j.arg);
-            ui_menu_refresh_slot(j.arg);
-            s_busy = false;
-            break;
-        default:
-            break;
+        xQueueReceive(s_work, &w, portMAX_DELAY);
+        if (w.kind == W_BATCH) {
+            do_batch(false);
+        } else {
+            handle_req(&w);
         }
-        /* Install / update screens end with Retry / Menu / Back buttons. */
-        s_busy = false;
+        ctl_end();      /* result screens end with Retry / Menu / Back buttons */
     }
 }
 
 static void footer_task(void *arg)
 {
-    char buf[48];
     for (;;) {
         int pct = axp2101_battery_percent();
         bool usb = axp2101_vbus_present();
         if (pct >= 0) {
-            snprintf(buf, sizeof(buf), "%s%d%%", usb ? "USB  " : "", pct);
+            snprintf(s_footer, sizeof(s_footer), "%s%d%%", usb ? "USB  " : "", pct);
         } else {
-            snprintf(buf, sizeof(buf), "%s", usb ? "USB" : "");
+            snprintf(s_footer, sizeof(s_footer), "%s", usb ? "USB" : "");
         }
-        ui_set_footer(buf);
+        ui_set_footer(s_footer);
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
 }
@@ -285,24 +550,27 @@ void app_main(void)
     /* NVS is shared with the apps: never erase it here. */
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "nvs_flash_init: %s - settings and overwrite guard unavailable", esp_err_to_name(err));
+        ESP_LOGW(TAG, "nvs_flash_init: %s - app names, order and settings unavailable", esp_err_to_name(err));
     }
 
-    slots_scan(s_slots);
+    s_job_mtx = xSemaphoreCreateMutex();
+    s_job.slot = -1;
+    slots_init();
+    slots_scan_all();
     ESP_ERROR_CHECK(board_init(NULL));
 
-    s_jobs = xQueueCreate(2, sizeof(job_t));
-    ui_init(s_slots, on_request);
-    ui_show_menu();
+    s_work = xQueueCreate(4, sizeof(work_t));
+    ui_init(on_request);
+    ui_set_hint("Wi-Fi unavailable");
+    show_menu();
     xTaskCreate(worker, "worker", 10240, NULL, 5, NULL);
     xTaskCreate(footer_task, "footer", 3072, NULL, 2, NULL);
 
-    bool any = false;
-    for (int i = 0; i < BASECAMP_NUM_SLOTS; i++) {
-        any |= s_slots[i].valid;
-    }
-    if (!any) {
-        ESP_LOGI(TAG, "no apps installed - starting first-time setup");
-        on_request(UI_REQ_INSTALL, ALL_SLOTS);
+    /* Setup network + web page. The menu works even if this fails. */
+    if (net_ap_start() == ESP_OK && webui_start() == ESP_OK) {
+        ui_set_hint(NET_AP_SSID "  -  " NET_AP_IP);
+        show_menu();
+    } else {
+        ESP_LOGW(TAG, "Wi-Fi / web UI not available");
     }
 }

@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BaseCamp</title>
+<style>
+:root{--bg:#0d0f12;--card:#171b21;--line:#2a313b;--txt:#e8ecf1;--dim:#8d97a6;--acc:#ff7a1a;--ok:#4cd07d;--bad:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.4 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:640px;margin:auto;padding:14px 14px 40px}
+h1{font-size:21px;margin:8px 0 0;letter-spacing:.04em}
+h2{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:0 0 10px}
+.sub{color:var(--dim);font-size:13px;margin-bottom:6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+.row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.dot{width:14px;height:14px;border-radius:50%;flex:none}
+.grow{flex:1;min-width:0}
+.name{font-weight:600;overflow-wrap:anywhere}
+.btns{display:flex;gap:6px;flex:none}
+@media(max-width:560px){.row{flex-wrap:wrap}.btns{flex-basis:100%;padding-left:24px}}
+.meta{color:var(--dim);font-size:12.5px}
+.warn{color:#ffb020;font-size:12.5px}.bad{color:var(--bad)}.ok{color:var(--ok)}
+button,.btn{font:inherit;color:var(--txt);background:#222831;border:1px solid var(--line);border-radius:9px;padding:8px 12px;cursor:pointer}
+button:active{background:#2c333d}button:disabled{opacity:.45}
+button.pri{background:var(--acc);border-color:var(--acc);color:#111;font-weight:600}
+button.ic{padding:6px 10px;min-width:38px}
+input,select{font:inherit;color:var(--txt);background:#10141a;border:1px solid var(--line);border-radius:9px;padding:9px 10px;width:100%}
+input[type=color]{padding:2px;height:38px;width:54px}input[type=file]{padding:8px}
+label{display:block;font-size:12.5px;color:var(--dim);margin:10px 0 4px}
+.two{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end}
+.tabs{display:flex;gap:6px;margin-bottom:6px}.tabs button{flex:1}.tabs button.on{border-color:var(--acc);color:var(--acc)}
+.bar{height:8px;background:#10141a;border-radius:6px;overflow:hidden;margin-top:8px}.bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+#banner{display:none;border-color:var(--acc)}
+#prev{position:relative;width:150px;height:150px;border-radius:50%;background:#000;border:2px solid var(--line);flex:none;overflow:hidden}
+#prev b{position:absolute;left:50%;top:9%;transform:translateX(-50%);font-size:8px;letter-spacing:.2em;color:#777}
+#prev i{position:absolute;left:50%;width:70%;height:20%;transform:translate(-50%,-50%);border:2px solid;border-radius:20px;font:600 9px/1 system-ui;display:flex;align-items:center;justify-content:center;font-style:normal;overflow:hidden;white-space:nowrap;padding:0 8px}
+.pv{display:flex;gap:14px;align-items:center}
+details summary{cursor:pointer;color:var(--dim);font-size:13px;margin-top:10px}
+a{color:var(--acc)}[hidden]{display:none!important}
+</style></head><body><main>
+<h1>BASECAMP <span class="sub" id="ver"></span></h1>
+<div class="sub">Add, order and remove the apps on your device. Changes show on the device right away.</div>
+
+<div class="card" id="banner"><div id="btxt"></div><div class="bar"><i id="bbar"></i></div></div>
+<div class="card" id="msgc" hidden><div id="msg"></div></div>
+
+<div class="card">
+ <h2>Apps on the device</h2>
+ <div class="pv"><div id="prev"></div><div class="grow meta" id="phint">Use the arrows to change the order they appear in on the round screen.</div></div>
+ <div id="apps"></div>
+ <div id="none" class="meta" hidden style="padding:10px 0">No apps yet. Add one below.</div>
+</div>
+
+<div class="card">
+ <h2>Add an app</h2>
+ <div class="tabs"><button id="t1" class="on">Upload .bin</button><button id="t2">From GitHub</button></div>
+ <label>Slot</label><select id="slot"></select>
+ <div id="up">
+  <label>App file (app-only OTA .bin, ESP32-S3, up to 4 MB)</label><input type="file" id="file" accept=".bin,application/octet-stream">
+ </div>
+ <div id="gh" hidden>
+  <div class="meta" style="margin:4px 0 6px">Downloads the latest release over your Wi-Fi (set it up below). Quick fill:</div>
+  <div id="presets" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+  <label>GitHub repository (owner/name)</label><input id="repo" placeholder="owner/name" autocapitalize="none" autocorrect="off" spellcheck="false">
+  <details><summary>Advanced: which file to pick</summary>
+   <label>Release file name starts with</label><input id="prefix" autocapitalize="none" spellcheck="false">
+   <label>...and ends with</label><input id="suffix" value=".bin" autocapitalize="none" spellcheck="false">
+   <label>Skip files containing (comma separated)</label><input id="exclude" autocapitalize="none" spellcheck="false">
+   <label>App name inside the image must contain (optional)</label><input id="project" autocapitalize="none" spellcheck="false">
+   <label>Image must contain this text (optional board check)</label><input id="marker" autocapitalize="none" spellcheck="false">
+  </details>
+ </div>
+ <div class="two"><div><label>Name on the device</label><input id="nname" maxlength="31" placeholder="(from the app)"></div>
+  <div><label>Colour</label><input type="color" id="ncol" value="#ff7a1a"></div></div>
+ <div style="margin-top:12px"><button class="pri" id="go">Upload</button></div>
+ <div class="bar" id="upbar" hidden><i id="upi"></i></div>
+</div>
+
+<div class="card">
+ <h2>Wi-Fi for GitHub downloads</h2>
+ <div id="wst" class="meta"></div>
+ <div class="two"><div><label>Network</label><select id="nets"><option value="">(scan to list networks)</option></select></div><div><button id="scan">Scan</button></div></div>
+ <label>or type the network name</label><input id="ssid" maxlength="32" autocapitalize="none" autocorrect="off">
+ <label>Password</label><input id="pass" type="password" maxlength="64" autocomplete="off">
+ <div style="margin-top:12px;display:flex;gap:8px"><button class="pri" id="wsave">Save &amp; connect</button><button id="wforget">Forget</button></div>
+ <div class="meta" style="margin-top:8px">Only needed for GitHub downloads and updates. Uploading from this page works without it. 2.4&nbsp;GHz WPA/WPA2 networks only.</div>
+</div>
+<div class="meta">Adding your own app: see <b>docs/ADD_YOUR_OWN_APP.md</b> in the project repository.</div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const el=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e};
+const hex=c=>/^[0-9a-f]{6}$/i.test(c)?'#'+c:'#888';
+async function api(p,body){
+ const o={method:body===undefined?'GET':'POST',headers:{'X-Basecamp':'1'}};
+ if(body!==undefined){o.body=JSON.stringify(body);o.headers['Content-Type']='application/json'}
+ const r=await fetch(p,o);let j={};try{j=await r.json()}catch(e){}
+ if(!r.ok)throw Object.assign(new Error(j.error||'HTTP '+r.status),{data:j});
+ return j}
+let S=null,mode='up',openEdit=-1,busyUp=false,lastSeq=-1;
+function say(t,bad){const c=$('#msgc');$('#msg').textContent=t;$('#msg').className=bad?'bad':'ok';c.hidden=!t;
+ clearTimeout(say.t);if(t)say.t=setTimeout(()=>c.hidden=true,9000)}
+const mb=n=>(n/1048576).toFixed(2)+' MB';
+
+async function refresh(){
+ try{S=await api('/api/state');render()}catch(e){say('Connection to the device lost - retrying...',true)}}
+function shown(){return S.order.filter(i=>S.slots[i].card)}
+
+function render(){
+ $('#ver').textContent='v'+S.v;
+ const sh=shown(),list=$('#apps');list.textContent='';
+ $('#none').hidden=sh.length>0;
+ sh.forEach((i,pos)=>{
+  const s=S.slots[i],r=el('div','row'),d=el('span','dot');d.style.background=hex(s.col);
+  const g=el('div','grow');g.append(el('div','name',s.name||'(unnamed)'));
+  let m=s.st==='app'?[s.ver,'slot '+(i+1),mb(s.size)].filter(Boolean).join(' · '):'slot '+(i+1)+' · '+s.detail;
+  if(s.src)m+=' · '+s.src;g.append(el('div','meta',m));
+  if(s.chg)g.append(el('div','warn','Changed since it was installed (an in-app updater may have overwritten it). Tap the app on the device and hold to accept.'));
+  if(s.st!=='app')g.append(el('div','bad',s.st==='damaged'?'Damaged - reinstall or remove it':'Install failed - retry or remove it'));
+  r.append(d,g);const bx=el('div','btns');
+  const b=(t,f,dis,ti)=>{const x=el('button','ic',t);x.disabled=!!dis;x.title=ti||'';x.onclick=f;return x};
+  bx.append(b('▲',()=>move(i,-1),pos===0,'Move up'),b('▼',()=>move(i,1),pos===sh.length-1,'Move down'),
+   b('✎',()=>{openEdit=openEdit===i?-1:i;render()},0,'Rename'));
+  if(s.src)bx.append(b('⟳',()=>update(i),0,'Update / reinstall from GitHub'));
+  bx.append(b('✕',()=>del(i),0,'Remove'));
+  r.append(bx);list.append(r);
+  if(openEdit===i){
+   const e=el('div','row');e.style.flexWrap='wrap';
+   const n=el('input');n.value=s.name;n.maxLength=31;const c=el('input');c.type='color';c.value=hex(s.col);c.style.width='54px';
+   const sv=el('button','pri','Save');sv.onclick=async()=>{try{await api('/api/rename',{slot:i,name:n.value,color:c.value.slice(1)});openEdit=-1;await refresh()}catch(x){say(x.message,1)}};
+   e.append(n,c,sv);list.append(e)}
+ });
+ // round preview
+ const pv=$('#prev');pv.textContent='';pv.append(el('b',0,'BASECAMP'));
+ const off={1:[0],2:[-13,13],3:[-25,0,25]}[sh.length]||[];
+ sh.forEach((i,k)=>{const p=el('i',0,S.slots[i].name);p.style.top=(54+off[k])+'%';p.style.borderColor=hex(S.slots[i].col);p.style.opacity=S.slots[i].st==='app'?1:.45;pv.append(p)});
+ // slot chooser
+ const sel=$('#slot'),keep=sel.value;sel.textContent='';
+ S.slots.forEach(s=>{const o=el('option',0,'Slot '+(s.i+1)+(s.card?' - replaces '+(s.name||'app'):' - free'));o.value=s.i;sel.append(o)});
+ sel.value=keep!==''&&S.slots[+keep]?keep:(S.free>=0?S.free:0);
+ btn();
+ // wifi
+ const w=S.wifi,st={none:'Not connected',connecting:'Connecting...',connected:'Connected',failed:'Could not connect'}[w.st];
+ $('#wst').textContent=w.has?'Saved network: '+w.ssid+' · '+st:'No network saved yet.';
+ $('#wst').className='meta '+(w.st==='connected'?'ok':w.st==='failed'?'bad':'');
+ // job banner
+ const j=S.job,bn=$('#banner');
+ if(j.active||S.busy&&!busyUp){bn.style.display='block';$('#btxt').textContent=j.active?(j.text||'Working...'):'The device is busy...';$('#bbar').style.width=(j.active?j.pct:0)+'%'}
+ else bn.style.display='none';
+ if(j.seq!==lastSeq){if(lastSeq>=0&&!j.active){j.err?say(j.err,1):say('Done.')}lastSeq=j.seq}
+}
+function btn(){const sl=S?S.slots[+$('#slot').value]:null;
+ $('#go').textContent=(mode==='up'?'Upload':'Install from GitHub')+(sl&&sl.card?' (replace)':'');}
+const occupied=()=>S.slots[+$('#slot').value].card;
+
+async function move(i,dir){
+ const sh=shown(),k=sh.indexOf(i),j=sh[k+dir];if(j===undefined)return;
+ const o=S.order.slice(),a=o.indexOf(i),b=o.indexOf(j);o[a]=j;o[b]=i;
+ try{await api('/api/order',{order:o});await refresh()}catch(e){say(e.message,1)}}
+async function del(i){
+ if(!confirm('Remove '+(S.slots[i].name||'this app')+' from the device?'))return;
+ try{await api('/api/delete',{slot:i});await refresh()}catch(e){say(e.message,1)}}
+async function update(i){
+ try{await api('/api/install',{update:i});say('Started - progress is shown above.');await refresh()}catch(e){say(e.message,1)}}
+
+function tab(m){mode=m;$('#t1').className=m==='up'?'on':'';$('#t2').className=m==='gh'?'on':'';
+ $('#up').hidden=m!=='up';$('#gh').hidden=m!=='gh';$('#go').textContent='';btn()}
+$('#t1').onclick=()=>tab('up');$('#t2').onclick=()=>tab('gh');$('#slot').onchange=btn;
+$('#file').onchange=e=>{const f=e.target.files[0];if(f&&!$('#nname').value)$('#nname').placeholder=f.name.replace(/\.bin$/i,'')};
+
+$('#go').onclick=async()=>{
+ const slot=+$('#slot').value,rep=occupied();
+ if(rep&&!confirm('Slot '+(slot+1)+' holds '+(S.slots[slot].name||'an app')+'. Replace it?'))return;
+ const name=$('#nname').value.trim(),col=$('#ncol').value.slice(1);
+ if(mode==='gh'){
+  const f=k=>$('#'+k).value.trim();
+  try{await api('/api/install',{slot,replace:rep,name,color:col,repo:f('repo'),prefix:f('prefix'),suffix:f('suffix'),exclude:f('exclude'),project:f('project'),marker:f('marker')});
+   say('Started - progress is shown above.');await refresh()}catch(e){say(e.message,1)}
+  return}
+ const file=$('#file').files[0];if(!file){say('Choose a .bin file first.',1);return}
+ if(file.size>4194304){say('That file is larger than the 4 MB slot.',1);return}
+ busyUp=true;$('#go').disabled=true;$('#upbar').hidden=false;
+ const x=new XMLHttpRequest();
+ x.open('POST','/api/upload?slot='+slot+'&replace='+(rep?1:0)+'&name='+encodeURIComponent(name)+'&color='+col);
+ x.setRequestHeader('X-Basecamp','1');
+ x.upload.onprogress=e=>{if(e.lengthComputable)$('#upi').style.width=(e.loaded*100/e.total)+'%'};
+ x.onloadend=async()=>{busyUp=false;$('#go').disabled=false;$('#upbar').hidden=true;$('#upi').style.width=0;
+  let j={};try{j=JSON.parse(x.responseText)}catch(e){}
+  if(x.status===200){say('Installed '+j.name+'.'+(j.warn?' '+j.warn:''),!!j.warn);$('#file').value='';$('#nname').value=''}
+  else say(j.error||'Upload failed (connection lost?)',1);
+  await refresh()};
+ x.send(file)};
+
+$('#scan').onclick=async()=>{
+ $('#scan').disabled=true;$('#nets').firstChild.textContent='Scanning...';
+ try{await api('/api/wifi/scan',{});
+  for(let k=0;k<20;k++){await new Promise(r=>setTimeout(r,800));const r=await api('/api/wifi/scan');
+   if(!r.running){const n=$('#nets');n.textContent='';n.append(new Option(r.nets.length?'Choose a network...':'No networks found',''));
+    r.nets.forEach(w=>n.append(new Option(w.ssid+'  ('+w.rssi+' dBm'+(w.open?', open':'')+')',w.ssid)));break}}
+ }catch(e){say('Scan failed. The page may have lost the connection briefly - try again.',1)}
+ $('#scan').disabled=false};
+$('#nets').onchange=()=>{if($('#nets').value)$('#ssid').value=$('#nets').value};
+$('#wsave').onclick=async()=>{const s=$('#ssid').value.trim();if(!s){say('Enter or choose a network.',1);return}
+ try{await api('/api/wifi',{ssid:s,pass:$('#pass').value});say('Saved. Connecting - the setup network may blink for a moment.');$('#pass').value='';await refresh()}
+ catch(e){say(e.message,1)}};
+$('#wforget').onclick=async()=>{try{await api('/api/wifi/forget',{});await refresh()}catch(e){say(e.message,1)}};
+
+(async()=>{await refresh();
+ if(S){const pb=$('#presets');S.presets.forEach(p=>{const b=el('button',0,p.name);b.onclick=()=>{
+  for(const k of ['repo','prefix','suffix','exclude','project','marker'])$('#'+k).value=p[k]||'';$('#nname').value=p.name};pb.append(b)})}
+ (async function loop(){await new Promise(r=>setTimeout(r,S&&S.job.active?800:3000));if(!busyUp)await refresh();loop()})()})();
+</script></body></html>

@@ -1,48 +1,46 @@
 /*
  * Round launcher UI for the 466x466 AMOLED.
- *   menu      : three stacked pill cards inside the circle, title, status line
- *               and a small "Updates" button.
- *   wifi      : how to join the Basecamp-Setup portal.
+ *   menu      : one pill card per installed app (0..3, in the order chosen on the
+ *               web page), a hint with the setup Wi-Fi, battery status, and a small
+ *               "Updates" button. With no apps it explains how to add some.
+ *   wifi      : how to add the Wi-Fi network used for GitHub downloads.
  *   progress  : one ring per app being installed + status text.
  *   updates   : current -> available per app, install button.
- * Everything that touches the network runs in main.c's worker task, which
- * calls these functions; they take the (recursive) LVGL port lock.
+ * Everything that touches the network runs in main.c's worker task, which calls
+ * these functions; they take the (recursive) LVGL port lock.
  */
 #include <stdio.h>
 #include <string.h>
 #include "ui.h"
 #include "lvgl.h"
-#include "esp_lvgl_port.h"
+#include "ui_port.h"
 
 #define BTN_W     300
 #define BTN_H     92
 #define BTN_PITCH 104
-#define CARD_Y0   8      /* vertical offset of the middle card */
+#define CARD_Y0   8      /* vertical offset of the card group's centre */
 
 /* Grey "empty / failed" look. Not LV_STATE_DISABLED: LVGL does not deliver
  * input events to disabled objects, and these cards must stay tappable. */
-#define CARD_EMPTY LV_STATE_USER_1
-
-static const uint32_t s_accent[BASECAMP_NUM_SLOTS] = {0xFF7A1A, 0x18C8B0, 0xC850F0};
+#define CARD_GREY LV_STATE_USER_1
 
 static ui_request_cb_t s_cb;
-static const basecamp_slot_t *s_slots;
 
-static lv_obj_t *s_card[BASECAMP_NUM_SLOTS];
-static lv_obj_t *s_card_name[BASECAMP_NUM_SLOTS];
-static lv_obj_t *s_card_sub[BASECAMP_NUM_SLOTS];
+static basecamp_slot_t s_snap[APPS_MAX];
+static uint8_t s_cards[APPS_MAX];
+static int s_ncards;
+static char s_hint[64] = "";
+
+static lv_obj_t *s_menu_scr;
 static lv_obj_t *s_footer;
 static lv_obj_t *s_busy;
 
-static lv_obj_t *s_ring[BASECAMP_NUM_SLOTS];
-static lv_obj_t *s_ring_pct[BASECAMP_NUM_SLOTS];
-static lv_obj_t *s_ring_state[BASECAMP_NUM_SLOTS];
+static lv_obj_t *s_ring[APPS_MAX];
+static lv_obj_t *s_ring_pct[APPS_MAX];
+static lv_obj_t *s_ring_state[APPS_MAX];
 static lv_obj_t *s_status;
 static lv_obj_t *s_action;
-static lv_obj_t *s_rows[BASECAMP_NUM_SLOTS];
-
-#define LOCK()   lvgl_port_lock(0)
-#define UNLOCK() lvgl_port_unlock()
+static lv_obj_t *s_rows[APPS_MAX];
 
 static void request(ui_req_t r, int arg)
 {
@@ -59,11 +57,10 @@ static lv_obj_t *new_screen(void)
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-    /* Forget per-screen widgets; they die with the old screen. */
-    memset(s_card, 0, sizeof(s_card));
+    /* Per-screen widgets die with the old screen; forget them. */
     memset(s_ring, 0, sizeof(s_ring));
     memset(s_rows, 0, sizeof(s_rows));
-    s_footer = s_status = s_action = s_busy = NULL;
+    s_footer = s_status = s_action = s_busy = s_menu_scr = NULL;
     return scr;
 }
 
@@ -80,6 +77,13 @@ static lv_obj_t *label(lv_obj_t *p, const lv_font_t *f, uint32_t color, const ch
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
     lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     return l;
+}
+
+/* One line, cut with "..." when too long. LVGL only truncates when the height is fixed. */
+static void one_line(lv_obj_t *l, const lv_font_t *f, int width)
+{
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    lv_obj_set_size(l, width, lv_font_get_line_height(f));
 }
 
 static lv_obj_t *title(lv_obj_t *scr, const char *txt)
@@ -122,30 +126,24 @@ static lv_obj_t *small_button(lv_obj_t *p, const char *txt, int y, ui_req_t req,
 
 /* ---------- menu ---------- */
 
-static void card_text(int i)
+void ui_init(ui_request_cb_t cb)
 {
-    const basecamp_slot_t *s = &s_slots[i];
-    if (!s_card[i]) {
-        return;
+    s_cb = cb;
+}
+
+void ui_set_apps(const basecamp_slot_t slots[APPS_MAX], const uint8_t order[APPS_MAX])
+{
+    unsigned mask = 0;
+    for (int i = 0; i < APPS_MAX; i++) {
+        s_snap[i] = slots[i];
+        if (slots_has_card(&slots[i])) mask |= 1u << i;
     }
-    lv_label_set_text(s_card_name[i], s->name);
-    const char *label_txt = s->part ? s->part->label : "?";
-    if (!s->valid) {
-        lv_obj_add_state(s_card[i], CARD_EMPTY);
-        lv_label_set_text_fmt(s_card_sub[i], LV_SYMBOL_DOWNLOAD " %s - tap to install", s->detail);
-        lv_obj_set_style_text_color(s_card_name[i], lv_color_hex(0x5A5A5A), 0);
-        lv_obj_set_style_text_color(s_card_sub[i], lv_color_hex(0x6A6A6A), 0);
-    } else {
-        lv_obj_remove_state(s_card[i], CARD_EMPTY);
-        lv_obj_set_style_text_color(s_card_name[i], lv_color_white(), 0);
-        if (s->changed) {
-            lv_label_set_text_fmt(s_card_sub[i], LV_SYMBOL_WARNING " %s  changed", s->version);
-            lv_obj_set_style_text_color(s_card_sub[i], lv_color_hex(0xFFB020), 0);
-        } else {
-            lv_label_set_text_fmt(s_card_sub[i], "%s  -  %s", s->version, label_txt);
-            lv_obj_set_style_text_color(s_card_sub[i], lv_color_hex(0xC8C8C8), 0);
-        }
-    }
+    s_ncards = apps_build_order(order, mask, s_cards);
+}
+
+void ui_set_hint(const char *text)
+{
+    strlcpy(s_hint, text, sizeof(s_hint));
 }
 
 static void card_click_cb(lv_event_t *e)
@@ -154,77 +152,100 @@ static void card_click_cb(lv_event_t *e)
     if (s_busy) {
         return;
     }
-    if (s_slots[slot].valid) {
+    const basecamp_slot_t *s = &s_snap[slot];
+    if (s->state == SLOT_APP) {
         request(UI_REQ_LAUNCH, slot);
-    } else {
-        request(UI_REQ_INSTALL, 1 << slot);
+    } else if (s->has_src) {
+        request(UI_REQ_RETRY_SLOT, slot);
     }
 }
 
 static void card_long_cb(lv_event_t *e)
 {
     int slot = (int)(intptr_t)lv_event_get_user_data(e);
-    if (s_slots[slot].changed) {
+    if (s_snap[slot].changed) {
         request(UI_REQ_ACCEPT, slot);
     }
 }
 
-static void make_card(lv_obj_t *scr, int i)
+static void make_card(lv_obj_t *scr, int slot, int y)
 {
+    const basecamp_slot_t *s = &s_snap[slot];
     lv_obj_t *btn = lv_button_create(scr);
-    s_card[i] = btn;
     lv_obj_set_size(btn, BTN_W, BTN_H);
-    lv_obj_align(btn, LV_ALIGN_CENTER, 0, CARD_Y0 + (i - 1) * BTN_PITCH);
-    pill_style(btn, s_accent[i]);
+    lv_obj_align(btn, LV_ALIGN_CENTER, 0, y);
+    pill_style(btn, s->color);
     lv_obj_set_style_border_width(btn, 3, 0);
-    /* Empty / failed slots look grey but stay tappable (retry install). */
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1A1A1A), CARD_EMPTY);
-    lv_obj_set_style_border_color(btn, lv_color_hex(0x3A3A3A), CARD_EMPTY);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x333333), CARD_EMPTY | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1A1A1A), CARD_GREY);
+    lv_obj_set_style_border_color(btn, lv_color_hex(0x3A3A3A), CARD_GREY);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(0x333333), CARD_GREY | LV_STATE_PRESSED);
     lv_obj_set_style_pad_all(btn, 6, 0);
-    lv_obj_add_event_cb(btn, card_click_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)i);
-    lv_obj_add_event_cb(btn, card_long_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)i);
+    lv_obj_add_event_cb(btn, card_click_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)slot);
+    lv_obj_add_event_cb(btn, card_long_cb, LV_EVENT_LONG_PRESSED, (void *)(intptr_t)slot);
 
-    s_card_name[i] = label(btn, &lv_font_montserrat_28, 0xFFFFFF, "");
-    lv_label_set_long_mode(s_card_name[i], LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_card_name[i], BTN_W - 40);
-    lv_obj_align(s_card_name[i], LV_ALIGN_CENTER, 0, -14);
+    lv_obj_t *name = label(btn, &lv_font_montserrat_28, s->state == SLOT_APP ? 0xFFFFFF : 0x6A6A6A, s->name);
+    one_line(name, &lv_font_montserrat_28, BTN_W - 40);
+    lv_obj_align(name, LV_ALIGN_CENTER, 0, -14);
 
-    s_card_sub[i] = label(btn, &lv_font_montserrat_20, 0xC8C8C8, "");
-    lv_label_set_long_mode(s_card_sub[i], LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_card_sub[i], BTN_W - 50);
-    lv_obj_align(s_card_sub[i], LV_ALIGN_CENTER, 0, 22);
-    card_text(i);
-}
-
-void ui_init(const basecamp_slot_t slots[BASECAMP_NUM_SLOTS], ui_request_cb_t cb)
-{
-    s_slots = slots;
-    s_cb = cb;
+    lv_obj_t *sub = label(btn, &lv_font_montserrat_20, 0xC8C8C8, "");
+    one_line(sub, &lv_font_montserrat_20, BTN_W - 50);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, 22);
+    if (s->state != SLOT_APP) {
+        lv_obj_add_state(btn, CARD_GREY);
+        lv_label_set_text_fmt(sub, s->has_src ? LV_SYMBOL_REFRESH " %s - retry" : "%s", s->detail);
+        lv_obj_set_style_text_color(sub, lv_color_hex(0x6A6A6A), 0);
+    } else if (s->changed) {
+        lv_label_set_text_fmt(sub, LV_SYMBOL_WARNING " %s  changed", s->version);
+        lv_obj_set_style_text_color(sub, lv_color_hex(0xFFB020), 0);
+    } else {
+        lv_label_set_text(sub, s->version);
+    }
 }
 
 void ui_show_menu(void)
 {
     LOCK();
     lv_obj_t *scr = new_screen();
+    s_menu_scr = scr;
     title(scr, "BASECAMP");
-    s_footer = label(scr, &lv_font_montserrat_14, 0x7A7A7A, "");
-    lv_obj_align(s_footer, LV_ALIGN_CENTER, 0, -158);
-    for (int i = 0; i < BASECAMP_NUM_SLOTS; i++) {
-        make_card(scr, i);
+    lv_obj_t *hint = label(scr, &lv_font_montserrat_14, 0x6E8FB0, "");
+    one_line(hint, &lv_font_montserrat_14, 330);
+    lv_label_set_text_fmt(hint, LV_SYMBOL_WIFI "  %s", s_hint[0] ? s_hint : "Wi-Fi unavailable");
+    lv_obj_align(hint, LV_ALIGN_CENTER, 0, -158);
+
+    if (s_ncards == 0) {
+        lv_obj_t *t = label(scr, &lv_font_montserrat_28, 0xFFFFFF, "No apps yet");
+        lv_obj_align(t, LV_ALIGN_CENTER, 0, -62);
+        lv_obj_t *m = label(scr, &lv_font_montserrat_20, 0xC8C8C8,
+                            "Add apps from your phone:\njoin the Wi-Fi shown above,\nthe page opens by itself.");
+        lv_obj_align(m, LV_ALIGN_CENTER, 0, 10);
+        lv_obj_t *b = lv_button_create(scr);
+        lv_obj_set_size(b, 250, 52);
+        lv_obj_align(b, LV_ALIGN_CENTER, 0, 118);
+        pill_style(b, 0xFF7A1A);
+        lv_obj_add_event_cb(b, action_cb, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)(((uint32_t)UI_REQ_INSTALL_DEFAULTS << 16)));
+        lv_obj_center(label(b, &lv_font_montserrat_20, 0xFFFFFF, LV_SYMBOL_DOWNLOAD " Install default apps"));
+    } else {
+        for (int k = 0; k < s_ncards; k++) {
+            make_card(scr, s_cards[k], CARD_Y0 + (2 * k - (s_ncards - 1)) * BTN_PITCH / 2);
+        }
+        lv_obj_t *upd = small_button(scr, LV_SYMBOL_REFRESH " Updates", 186, UI_REQ_CHECK_UPDATES, 0);
+        lv_obj_set_size(upd, 150, 38);
+        lv_obj_set_style_text_font(lv_obj_get_child(upd, 0), &lv_font_montserrat_14, 0);
     }
-    lv_obj_t *upd = small_button(scr, LV_SYMBOL_REFRESH " Updates", 186, UI_REQ_CHECK_UPDATES, 0);
-    lv_obj_set_size(upd, 150, 38);
-    lv_obj_set_style_text_font(lv_obj_get_child(upd, 0), &lv_font_montserrat_14, 0);
+    s_footer = label(scr, &lv_font_montserrat_14, 0x7A7A7A, "");
+    lv_obj_align(s_footer, LV_ALIGN_CENTER, 0, 214);
     load(scr);
     UNLOCK();
 }
 
-void ui_menu_refresh_slot(int slot)
+bool ui_menu_visible(void)
 {
     LOCK();
-    card_text(slot);
+    bool v = s_menu_scr && s_menu_scr == lv_screen_active();
     UNLOCK();
+    return v;
 }
 
 void ui_set_footer(const char *text)
@@ -236,7 +257,7 @@ void ui_set_footer(const char *text)
     UNLOCK();
 }
 
-void ui_show_launching(int slot)
+void ui_show_launching(const char *name, uint32_t color)
 {
     LOCK();
     lv_obj_t *scr = new_screen();
@@ -248,31 +269,29 @@ void ui_show_launching(int slot)
     lv_arc_set_value(ring, 100);
     lv_obj_remove_style(ring, NULL, LV_PART_KNOB);
     lv_obj_remove_flag(ring, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_color(ring, lv_color_hex(s_accent[slot]), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ring, lv_color_hex(color), LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(ring, 6, LV_PART_INDICATOR);
     lv_obj_set_style_arc_opa(ring, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_t *l = label(scr, &lv_font_montserrat_28, 0xFFFFFF, "");
-    lv_label_set_text_fmt(l, "Starting\n%s", s_slots[slot].name);
+    lv_label_set_text_fmt(l, "Starting\n%s", name);
     lv_obj_center(l);
     load(scr);
     UNLOCK();
 }
 
-/* ---------- Wi-Fi setup ---------- */
+/* ---------- Wi-Fi needed ---------- */
 
 void ui_show_wifi_setup(const char *notice)
 {
     LOCK();
     lv_obj_t *scr = new_screen();
-    title(scr, "WI-FI SETUP");
+    title(scr, "WI-FI NEEDED");
     lv_obj_t *steps = label(scr, &lv_font_montserrat_20, 0xFFFFFF, "On your phone, join the Wi-Fi");
     lv_obj_align(steps, LV_ALIGN_CENTER, 0, -110);
-    lv_obj_t *ssid = label(scr, &lv_font_montserrat_28, 0xFF7A1A, "Basecamp-Setup");
+    lv_obj_t *ssid = label(scr, &lv_font_montserrat_28, 0xFF7A1A, "BaseCamp-Setup");
     lv_obj_align(ssid, LV_ALIGN_CENTER, 0, -70);
     lv_obj_t *more = label(scr, &lv_font_montserrat_20, 0xC8C8C8,
-                           "The setup page opens by itself.\n"
-                           "If not, browse to 192.168.4.1\n"
-                           "Pick your network, enter\nthe password, tap Connect.");
+                           "then, on the page that opens,\nchoose your home Wi-Fi\nand enter its password.");
     lv_obj_align(more, LV_ALIGN_CENTER, 0, 20);
     s_status = label(scr, &lv_font_montserrat_14, 0xFF6A6A, notice ? notice : "");
     lv_label_set_long_mode(s_status, LV_LABEL_LONG_WRAP);
@@ -285,18 +304,19 @@ void ui_show_wifi_setup(const char *notice)
 
 /* ---------- install progress ---------- */
 
-void ui_show_progress(const char *ttl, uint32_t mask)
+void ui_show_progress(const char *ttl, uint32_t mask, const char *const names[APPS_MAX],
+                      const uint32_t colors[APPS_MAX])
 {
     LOCK();
     lv_obj_t *scr = new_screen();
     s_busy = scr;
     title(scr, ttl);
     int n = 0;
-    for (int i = 0; i < BASECAMP_NUM_SLOTS; i++) {
+    for (int i = 0; i < APPS_MAX; i++) {
         n += (mask >> i) & 1;
     }
     int k = 0;
-    for (int i = 0; i < BASECAMP_NUM_SLOTS; i++) {
+    for (int i = 0; i < APPS_MAX; i++) {
         if (!((mask >> i) & 1)) {
             continue;
         }
@@ -315,18 +335,18 @@ void ui_show_progress(const char *ttl, uint32_t mask)
         lv_obj_set_style_arc_width(ring, 10, LV_PART_MAIN);
         lv_obj_set_style_arc_width(ring, 10, LV_PART_INDICATOR);
         lv_obj_set_style_arc_color(ring, lv_color_hex(0x262626), LV_PART_MAIN);
-        lv_obj_set_style_arc_color(ring, lv_color_hex(s_accent[i]), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(ring, lv_color_hex(colors[i]), LV_PART_INDICATOR);
 
         /* Child of the ring + centre alignment: LVGL keeps it centred when
          * the text (and so the label width) changes. */
         s_ring_pct[i] = label(ring, &lv_font_montserrat_20, 0xFFFFFF, "--");
         lv_obj_center(s_ring_pct[i]);
 
-        lv_obj_t *nm = label(scr, &lv_font_montserrat_14, 0xFFFFFF, s_slots[i].name);
+        lv_obj_t *nm = label(scr, &lv_font_montserrat_14, 0xFFFFFF, names[i]);
+        one_line(nm, &lv_font_montserrat_14, 130);
         lv_obj_align_to(nm, ring, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
         s_ring_state[i] = label(scr, &lv_font_montserrat_14, 0x8A8A8A, "waiting");
-        lv_obj_set_width(s_ring_state[i], 130);
-        lv_label_set_long_mode(s_ring_state[i], LV_LABEL_LONG_DOT);
+        one_line(s_ring_state[i], &lv_font_montserrat_14, 130);
         lv_obj_align_to(s_ring_state[i], nm, LV_ALIGN_OUT_BOTTOM_MID, 0, 2);
     }
     s_status = label(scr, &lv_font_montserrat_14, 0xC8C8C8, "");
@@ -354,8 +374,7 @@ void ui_progress_slot(int slot, int percent, const char *state, bool failed)
         }
         if (state) {
             lv_label_set_text(s_ring_state[slot], state);
-            lv_obj_set_style_text_color(s_ring_state[slot],
-                                        lv_color_hex(failed ? 0xFF6A6A : 0x8A8A8A), 0);
+            lv_obj_set_style_text_color(s_ring_state[slot], lv_color_hex(failed ? 0xFF6A6A : 0x8A8A8A), 0);
         }
     }
     UNLOCK();
@@ -380,8 +399,7 @@ void ui_action_button(const char *txt, ui_req_t req, int arg)
     UNLOCK();
 }
 
-void ui_action_pair(const char *left, ui_req_t lreq, int larg,
-                    const char *right, ui_req_t rreq, int rarg)
+void ui_action_pair(const char *left, ui_req_t lreq, int larg, const char *right, ui_req_t rreq, int rarg)
 {
     LOCK();
     if (s_action) {
@@ -404,20 +422,21 @@ void ui_action_pair(const char *left, ui_req_t lreq, int larg,
 
 /* ---------- updates ---------- */
 
-void ui_show_updates(void)
+void ui_show_updates(int n, const char *const names[], const uint32_t colors[])
 {
     LOCK();
     lv_obj_t *scr = new_screen();
     s_busy = scr;
     title(scr, "UPDATES");
-    for (int i = 0; i < BASECAMP_NUM_SLOTS; i++) {
-        lv_obj_t *nm = label(scr, &lv_font_montserrat_20, 0xFFFFFF, s_slots[i].name);
-        lv_obj_set_style_text_color(nm, lv_color_hex(s_accent[i]), 0);
-        lv_obj_align(nm, LV_ALIGN_CENTER, 0, -118 + i * 70);
-        s_rows[i] = label(scr, &lv_font_montserrat_20, 0xC8C8C8, "checking...");
-        lv_obj_set_width(s_rows[i], 320);
-        lv_label_set_long_mode(s_rows[i], LV_LABEL_LONG_DOT);
-        lv_obj_align(s_rows[i], LV_ALIGN_CENTER, 0, -90 + i * 70);
+    if (n > APPS_MAX) n = APPS_MAX;
+    for (int i = 0; i < n; i++) {
+        int y = -10 + (2 * i - (n - 1)) * 35;
+        lv_obj_t *nm = label(scr, &lv_font_montserrat_20, colors[i], names[i]);
+        one_line(nm, &lv_font_montserrat_20, 320);
+        lv_obj_align(nm, LV_ALIGN_CENTER, 0, y - 14);
+        s_rows[i] = label(scr, &lv_font_montserrat_14, 0xC8C8C8, "checking...");
+        one_line(s_rows[i], &lv_font_montserrat_14, 330);
+        lv_obj_align(s_rows[i], LV_ALIGN_CENTER, 0, y + 10);
     }
     s_status = label(scr, &lv_font_montserrat_14, 0xC8C8C8, "");
     lv_label_set_long_mode(s_status, LV_LABEL_LONG_WRAP);
@@ -427,12 +446,12 @@ void ui_show_updates(void)
     UNLOCK();
 }
 
-void ui_updates_row(int slot, const char *text, bool available)
+void ui_updates_row(int row, const char *text, bool available)
 {
     LOCK();
-    if (s_rows[slot]) {
-        lv_label_set_text(s_rows[slot], text);
-        lv_obj_set_style_text_color(s_rows[slot], lv_color_hex(available ? 0x7CFF7C : 0xC8C8C8), 0);
+    if (row >= 0 && row < APPS_MAX && s_rows[row]) {
+        lv_label_set_text(s_rows[row], text);
+        lv_obj_set_style_text_color(s_rows[row], lv_color_hex(available ? 0x7CFF7C : 0xC8C8C8), 0);
     }
     UNLOCK();
 }

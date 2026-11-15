@@ -1,57 +1,64 @@
 /*
- * Installs app slots straight from GitHub releases:
+ * Installs an app straight from a GitHub release:
  *   GET https://api.github.com/repos/<repo>/releases/latest
- *   -> pick the slot's asset -> stream it into the OTA partition via the API
- *   asset URL (api.github.com/.../releases/assets/<id>, Accept:
- *   application/octet-stream, 302 to release-assets.githubusercontent.com).
- *   The github.com/.../releases/download route is only a fallback: it often
- *   answers 504 after ~11 s, while the API route answers in <1 s.
- * Only esp_ota_begin/write/end on the target partition is used; the boot
- * partition / otadata is never changed (the Basecamp bootloader ignores it).
+ *   -> pick the asset by name -> stream it into the slot via the API asset URL
+ *   (api.github.com/.../releases/assets/<id>, Accept: application/octet-stream,
+ *   302 to release-assets.githubusercontent.com).
+ * The github.com/.../releases/download route is only a fallback: it often
+ * answers 504 after ~11 s, while the API route answers in <1 s.
+ * The boot partition / otadata is never touched (the Basecamp bootloader
+ * ignores it).
  */
 #include <string.h>
 #include <stdio.h>
+#include <strings.h>
 #include "installer.h"
-#include "slots.h"
+#include "swriter.h"
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
-#include "esp_ota_ops.h"
-#include "esp_partition.h"
-#include "esp_app_desc.h"
 #include "esp_heap_caps.h"
-#include "nvs.h"
 #include "cJSON.h"
-#include "mbedtls/sha256.h"
 
 static const char *TAG = "install";
 
-#define NVS_NS        "basecamp"
 #define API_FMT       "https://api.github.com/repos/%s/releases/latest"
 #define API_MAX_BODY  (512 * 1024)
 #define DL_CHUNK      4096
 #define USER_AGENT    "SLOPEFORM-Basecamp-launcher"
 
-static const inst_source_t s_sources[BASECAMP_NUM_SLOTS] = {
-    {CONFIG_BASECAMP_SLOT0_REPO, CONFIG_BASECAMP_SLOT0_ASSET_PREFIX,
-     CONFIG_BASECAMP_SLOT0_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT0_PROJECT,
-     CONFIG_BASECAMP_SLOT0_ASSET_EXCLUDE, CONFIG_BASECAMP_SLOT0_BOARD_MARKER},
-    {CONFIG_BASECAMP_SLOT1_REPO, CONFIG_BASECAMP_SLOT1_ASSET_PREFIX,
-     CONFIG_BASECAMP_SLOT1_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT1_PROJECT,
-     CONFIG_BASECAMP_SLOT1_ASSET_EXCLUDE, CONFIG_BASECAMP_SLOT1_BOARD_MARKER},
-    {CONFIG_BASECAMP_SLOT2_REPO, CONFIG_BASECAMP_SLOT2_ASSET_PREFIX,
-     CONFIG_BASECAMP_SLOT2_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT2_PROJECT,
-     CONFIG_BASECAMP_SLOT2_ASSET_EXCLUDE, CONFIG_BASECAMP_SLOT2_BOARD_MARKER},
-};
-
-const inst_source_t *inst_source(int slot)
+void inst_preset(int k, inst_source_t *src, char name[32])
 {
-    return (slot >= 0 && slot < BASECAMP_NUM_SLOTS) ? &s_sources[slot] : NULL;
+    static const struct {
+        const char *name, *repo, *prefix, *suffix, *exclude, *project, *marker;
+    } p[INST_PRESETS] = {
+        {CONFIG_BASECAMP_SLOT0_NAME, CONFIG_BASECAMP_SLOT0_REPO, CONFIG_BASECAMP_SLOT0_ASSET_PREFIX,
+         CONFIG_BASECAMP_SLOT0_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT0_ASSET_EXCLUDE,
+         CONFIG_BASECAMP_SLOT0_PROJECT, CONFIG_BASECAMP_SLOT0_BOARD_MARKER},
+        {CONFIG_BASECAMP_SLOT1_NAME, CONFIG_BASECAMP_SLOT1_REPO, CONFIG_BASECAMP_SLOT1_ASSET_PREFIX,
+         CONFIG_BASECAMP_SLOT1_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT1_ASSET_EXCLUDE,
+         CONFIG_BASECAMP_SLOT1_PROJECT, CONFIG_BASECAMP_SLOT1_BOARD_MARKER},
+        {CONFIG_BASECAMP_SLOT2_NAME, CONFIG_BASECAMP_SLOT2_REPO, CONFIG_BASECAMP_SLOT2_ASSET_PREFIX,
+         CONFIG_BASECAMP_SLOT2_ASSET_SUFFIX, CONFIG_BASECAMP_SLOT2_ASSET_EXCLUDE,
+         CONFIG_BASECAMP_SLOT2_PROJECT, CONFIG_BASECAMP_SLOT2_BOARD_MARKER},
+    };
+    memset(src, 0, sizeof *src);
+    if (k < 0 || k >= INST_PRESETS) {
+        name[0] = 0;
+        return;
+    }
+    strlcpy(name, p[k].name, 32);
+    strlcpy(src->repo, p[k].repo, sizeof src->repo);
+    strlcpy(src->prefix, p[k].prefix, sizeof src->prefix);
+    strlcpy(src->suffix, p[k].suffix, sizeof src->suffix);
+    strlcpy(src->exclude, p[k].exclude, sizeof src->exclude);
+    strlcpy(src->project, p[k].project, sizeof src->project);
+    strlcpy(src->marker, p[k].marker, sizeof src->marker);
 }
 
 #define FAIL(code, ...) do { snprintf(err, err_len, __VA_ARGS__); \
-                             ESP_LOGE(TAG, "ota_%d: %s", slot, err); ret = (code); goto done; } while (0)
+                             ESP_LOGE(TAG, "%s", err); ret = (code); goto done; } while (0)
 
 static bool redirect_status(int s)
 {
@@ -119,8 +126,8 @@ static bool hex_to_bytes(const char *hex, uint8_t *out, size_t n)
 
 static bool excluded(const inst_source_t *src, const char *name)
 {
-    char list[64];
-    strlcpy(list, src->asset_exclude, sizeof(list));
+    char list[sizeof src->exclude];
+    strlcpy(list, src->exclude, sizeof(list));
     for (char *save = NULL, *tok = strtok_r(list, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
         while (*tok == ' ') tok++;
         if (*tok && strcasestr(name, tok)) {
@@ -132,73 +139,22 @@ static bool excluded(const inst_source_t *src, const char *name)
 
 static bool name_matches(const inst_source_t *src, const char *name)
 {
-    size_t nl = strlen(name), pl = strlen(src->asset_prefix), sl = strlen(src->asset_suffix);
-    return nl >= pl && nl >= sl && strncmp(name, src->asset_prefix, pl) == 0 &&
-           strcmp(name + nl - sl, src->asset_suffix) == 0 && !excluded(src, name);
+    size_t nl = strlen(name), pl = strlen(src->prefix), sl = strlen(src->suffix);
+    return nl >= pl && nl >= sl && strncmp(name, src->prefix, pl) == 0 &&
+           strcmp(name + nl - sl, src->suffix) == 0 && !excluded(src, name);
 }
 
-/* Streaming substring search across chunk boundaries. */
-typedef struct {
-    const char *pat;
-    size_t len, matched;
-    bool found;
-} marker_t;
-
-static void marker_init(marker_t *m, const char *pat)
+esp_err_t inst_fetch_latest(const inst_source_t *src, inst_release_t *out, char *err, size_t err_len)
 {
-    m->pat = pat;
-    m->len = strlen(pat);
-    m->matched = 0;
-    m->found = (m->len == 0);
-}
-
-static void marker_feed(marker_t *m, const uint8_t *d, size_t n)
-{
-    for (size_t i = 0; i < n && !m->found; i++) {
-        /* Naive restart is fine: the markers have no repeated prefix. */
-        if (d[i] == (uint8_t)m->pat[m->matched]) {
-            if (++m->matched == m->len) {
-                m->found = true;
-            }
-        } else {
-            m->matched = (d[i] == (uint8_t)m->pat[0]) ? 1 : 0;
-        }
-    }
-}
-
-bool inst_image_has_marker(int slot, const esp_partition_t *part, uint32_t len)
-{
-    const inst_source_t *src = inst_source(slot);
-    marker_t m;
-    marker_init(&m, src ? src->board_marker : "");
-    if (m.found) {
-        return true;
-    }
-    if (len == 0 || len > part->size) {
-        len = part->size;
-    }
-    const void *map;
-    esp_partition_mmap_handle_t h;
-    if (esp_partition_mmap(part, 0, len, ESP_PARTITION_MMAP_DATA, &map, &h) != ESP_OK) {
-        return true; /* cannot check - do not block */
-    }
-    marker_feed(&m, map, len);
-    esp_partition_munmap(h);
-    return m.found;
-}
-
-esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err_len)
-{
-    const inst_source_t *src = inst_source(slot);
     esp_err_t ret = ESP_OK;
     char *body = NULL;
     cJSON *root = NULL;
     esp_http_client_handle_t c = NULL;
-    char url[160];
+    char url[sizeof src->repo + 48];
 
     memset(out, 0, sizeof(*out));
-    if (!src) {
-        snprintf(err, err_len, "bad slot");
+    if (!apps_valid_repo(src->repo)) {
+        snprintf(err, err_len, "bad repo name");
         return ESP_ERR_INVALID_ARG;
     }
     snprintf(url, sizeof(url), API_FMT, src->repo);
@@ -220,7 +176,7 @@ esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err
         total += r;
     }
     body[total] = 0;
-    if (total <= 0) FAIL(ESP_FAIL, "empty API response");
+    if (total <= 0) FAIL(ESP_ERR_TIMEOUT, "empty API response");
 
     root = cJSON_Parse(body);
     if (!root) FAIL(ESP_FAIL, "bad API response");
@@ -237,11 +193,11 @@ esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err
         }
         const cJSON *dl = cJSON_GetObjectItem(a, "browser_download_url");
         const cJSON *api = cJSON_GetObjectItem(a, "url");
+        const cJSON *size = cJSON_GetObjectItem(a, "size");
+        const cJSON *digest = cJSON_GetObjectItem(a, "digest");
         if (cJSON_IsString(api)) {
             strlcpy(out->api_url, api->valuestring, sizeof(out->api_url));
         }
-        const cJSON *size = cJSON_GetObjectItem(a, "size");
-        const cJSON *digest = cJSON_GetObjectItem(a, "digest");
         if (!cJSON_IsString(dl) || !cJSON_IsNumber(size)) {
             continue;
         }
@@ -252,12 +208,11 @@ esp_err_t inst_fetch_latest(int slot, inst_release_t *out, char *err, size_t err
             strlen(digest->valuestring) == 7 + 64) {
             out->has_digest = hex_to_bytes(digest->valuestring + 7, out->sha256, 32);
         }
-        ESP_LOGI(TAG, "ota_%d: %s %s, %s (%" PRIu32 " bytes, digest %s)", slot, src->repo,
-                 out->tag, out->asset_name, out->size, out->has_digest ? "yes" : "no");
+        ESP_LOGI(TAG, "%s %s, %s (%u bytes, digest %s)", src->repo, out->tag, out->asset_name,
+                 (unsigned)out->size, out->has_digest ? "yes" : "no");
         goto done;
     }
-    FAIL(ESP_ERR_NOT_FOUND, "%s %s has no %s*%s asset", src->repo, out->tag,
-         src->asset_prefix, src->asset_suffix);
+    FAIL(ESP_ERR_NOT_FOUND, "%s %s has no matching .bin asset", src->repo, out->tag);
 
 done:
     cJSON_Delete(root);
@@ -268,56 +223,17 @@ done:
     return ret;
 }
 
-static void save_tag(int slot, const char *tag)
+esp_err_t inst_install(int slot, const inst_source_t *src, const inst_release_t *rel,
+                       inst_progress_cb_t cb, void *ctx, bool *slot_erased, char *err, size_t err_len)
 {
-    nvs_handle_t h;
-    char key[8];
-    snprintf(key, sizeof(key), "tag%d", slot);
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
-        if (tag) {
-            nvs_set_str(h, key, tag);
-        } else {
-            nvs_erase_key(h, key);
-        }
-        nvs_commit(h);
-        nvs_close(h);
-    }
-}
-
-void inst_get_tag(int slot, char *out, size_t len)
-{
-    nvs_handle_t h;
-    char key[8];
-    out[0] = 0;
-    snprintf(key, sizeof(key), "tag%d", slot);
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        if (nvs_get_str(h, key, out, &len) != ESP_OK) {
-            out[0] = 0;
-        }
-        nvs_close(h);
-    }
-}
-
-esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t cb, void *ctx,
-                       char *err, size_t err_len)
-{
-    const inst_source_t *src = inst_source(slot);
     esp_err_t ret = ESP_OK;
     esp_http_client_handle_t c = NULL;
-    esp_ota_handle_t ota = 0;
-    bool ota_open = false, slot_touched = false;
     uint8_t *buf = NULL;
-    mbedtls_sha256_context sha;
-    mbedtls_sha256_init(&sha);
+    sw_result_t res;
+    bool writer_open = false;
+    *slot_erased = false;
 
-    const esp_partition_t *part = esp_partition_find_first(
-        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_MIN + slot, NULL);
-    if (!src || !part) FAIL(ESP_ERR_NOT_FOUND, "no ota_%d partition", slot);
-    if (part == esp_ota_get_running_partition()) FAIL(ESP_FAIL, "slot is running");
-    if (rel->size == 0 || rel->size > part->size)
-        FAIL(ESP_ERR_INVALID_SIZE, "%s is %" PRIu32 " KB, slot holds %" PRIu32 " KB",
-             rel->asset_name, rel->size / 1024, part->size / 1024);
-
+    if (rel->size == 0) FAIL(ESP_ERR_INVALID_SIZE, "release asset is empty");
     buf = malloc(DL_CHUNK);
     if (!buf) FAIL(ESP_ERR_NO_MEM, "no memory");
     c = make_client(rel->api_url[0] ? rel->api_url : rel->url, false);
@@ -329,20 +245,13 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
     if (status >= 500 || status == 429) FAIL(ESP_ERR_TIMEOUT, "download HTTP %d", status);
     if (status != 200) FAIL(ESP_FAIL, "download HTTP %d", status);
     if (clen > 0 && (uint64_t)clen != rel->size)
-        FAIL(ESP_ERR_INVALID_SIZE, "size mismatch (%ld vs %" PRIu32 ")", (long)clen, rel->size);
+        FAIL(ESP_ERR_INVALID_SIZE, "size mismatch (%ld vs %u)", (long)clen, (unsigned)rel->size);
 
-    ESP_LOGI(TAG, "ota_%d: writing %s to %s @0x%06" PRIx32, slot, rel->asset_name, part->label, part->address);
-    slot_touched = true;
-    /* Sequential mode erases sector by sector while writing: no multi-second
-     * full-slot erase that would freeze the display. */
-    if (esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &ota) != ESP_OK) FAIL(ESP_FAIL, "flash erase failed");
-    ota_open = true;
-    mbedtls_sha256_starts(&sha, 0);
+    if ((ret = sw_begin(slot, rel->size, src->marker, err, err_len)) != ESP_OK) goto done;
+    writer_open = true;
 
     uint32_t got = 0;
     int last_pct = -1;
-    marker_t board;
-    marker_init(&board, src->board_marker);
     while (got < rel->size) {
         int r = esp_http_client_read(c, (char *)buf, DL_CHUNK);
         if (r < 0) FAIL(ESP_ERR_TIMEOUT, "download interrupted");
@@ -353,9 +262,7 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
             FAIL(ESP_ERR_TIMEOUT, "download stalled");
         }
         if (got + r > rel->size) FAIL(ESP_ERR_INVALID_SIZE, "asset larger than announced");
-        mbedtls_sha256_update(&sha, buf, r);
-        marker_feed(&board, buf, r);
-        if (esp_ota_write(ota, buf, r) != ESP_OK) FAIL(ESP_FAIL, "flash write failed");
+        if ((ret = sw_write(buf, r, err, err_len)) != ESP_OK) goto done;
         got += r;
         int pct = (int)((uint64_t)got * 100 / rel->size);
         if (pct != last_pct && cb) {
@@ -363,36 +270,26 @@ esp_err_t inst_install(int slot, const inst_release_t *rel, inst_progress_cb_t c
             last_pct = pct;
         }
     }
-    if (got != rel->size) FAIL(ESP_ERR_INVALID_SIZE, "short download (%" PRIu32 "/%" PRIu32 ")", got, rel->size);
+    if (got != rel->size) FAIL(ESP_ERR_TIMEOUT, "short download (%u/%u)", (unsigned)got, (unsigned)rel->size);
 
-    uint8_t digest[32];
-    mbedtls_sha256_finish(&sha, digest);
-    if (rel->has_digest && memcmp(digest, rel->sha256, 32) != 0) FAIL(ESP_ERR_INVALID_CRC, "sha256 mismatch");
-    if (!board.found) FAIL(ESP_ERR_INVALID_VERSION, "built for a different board");
+    if ((ret = sw_finish(&res, err, err_len)) != ESP_OK) goto done;
+    if (rel->has_digest && memcmp(res.sha256, rel->sha256, 32) != 0) FAIL(ESP_ERR_INVALID_CRC, "sha256 mismatch");
+    if (!res.marker_found) FAIL(ESP_ERR_INVALID_VERSION, "built for a different board");
+    if (src->project[0] && !strstr(res.desc.project_name, src->project))
+        FAIL(ESP_ERR_INVALID_VERSION, "wrong app: '%.31s' (expected '%.31s')", res.desc.project_name, src->project);
 
-    ota_open = false;
-    if (esp_ota_end(ota) != ESP_OK) FAIL(ESP_ERR_OTA_VALIDATE_FAILED, "image failed verification");
-
-    esp_app_desc_t desc;
-    if (esp_ota_get_partition_description(part, &desc) != ESP_OK) FAIL(ESP_FAIL, "no app descriptor");
-    if (!strstr(desc.project_name, src->project_match))
-        FAIL(ESP_ERR_INVALID_VERSION, "wrong app: '%s' (expected '%s')", desc.project_name, src->project_match);
-
-    save_tag(slot, rel->tag);
-    basecamp_slot_t s = {.part = part};
-    slots_accept(&s, slot); /* new image is the guard's baseline */
-    ESP_LOGI(TAG, "ota_%d: installed %s %s (%s %s)", slot, src->repo, rel->tag, desc.project_name, desc.version);
+    ESP_LOGI(TAG, "ota_%d: installed %s %s (%s %s)", slot, src->repo, rel->tag, res.desc.project_name,
+             res.desc.version);
 
 done:
-    if (ota_open) {
-        esp_ota_abort(ota);
+    if (writer_open) {
+        *slot_erased = sw_erased();
+        if (ret == ESP_OK) {
+            sw_done();
+        } else {
+            sw_abort();
+        }
     }
-    if (ret != ESP_OK && slot_touched && part) {
-        /* Never leave a half-written image: blank the header so the slot reads as empty. */
-        esp_partition_erase_range(part, 0, 0x10000);
-        save_tag(slot, NULL);
-    }
-    mbedtls_sha256_free(&sha);
     if (c) {
         esp_http_client_close(c);
         esp_http_client_cleanup(c);

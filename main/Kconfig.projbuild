@@ -1,28 +1,14 @@
 menu "Basecamp launcher"
 
     config BASECAMP_SLOT0_NAME
-        string "ota_0 display name"
+        string "default app 1 display name"
         default "PrintSphere"
     config BASECAMP_SLOT1_NAME
-        string "ota_1 display name"
+        string "default app 2 display name"
         default "Capsule Radar"
     config BASECAMP_SLOT2_NAME
-        string "ota_2 display name"
+        string "default app 3 display name"
         default "LyricFlash"
-
-    config BASECAMP_SLOT0_VERSION
-        string "ota_0 version label if the app descriptor is generic"
-        default ""
-    config BASECAMP_SLOT1_VERSION
-        string "ota_1 version label if the app descriptor is generic"
-        default "v1.6.0"
-        help
-            Arduino builds carry project_name "arduino-lib-builder" and the
-            lib-builder git hash as version, so the real version can't be read
-            from esp_app_desc_t. This label is shown instead (marked with "*").
-    config BASECAMP_SLOT2_VERSION
-        string "ota_2 version label if the app descriptor is generic"
-        default ""
 
     config BASECAMP_VERIFY_SLOTS
         bool "Fully verify each slot image (SHA-256) before showing it as bootable"
@@ -33,67 +19,67 @@ menu "Basecamp launcher"
             (the bootloader still verifies before booting).
 
 
-    menu "App sources (GitHub releases)"
+    menu "Default apps (GitHub releases)"
         config BASECAMP_SLOT0_REPO
-            string "ota_0 GitHub repo (owner/repo)"
+            string "default app 1 GitHub repo (owner/repo)"
             default "cptkirki/PrintSphere"
         config BASECAMP_SLOT0_ASSET_PREFIX
-            string "ota_0 asset name starts with"
+            string "default app 1 asset name starts with"
             default "printsphere_ota"
         config BASECAMP_SLOT0_ASSET_SUFFIX
-            string "ota_0 asset name ends with"
+            string "default app 1 asset name ends with"
             default ".bin"
         config BASECAMP_SLOT0_PROJECT
-            string "ota_0 project_name must contain"
+            string "default app 1 project_name must contain"
             default "printsphere"
         config BASECAMP_SLOT0_ASSET_EXCLUDE
-            string "ota_0 skip assets whose name contains (comma-separated)"
+            string "default app 1 skip assets whose name contains (comma-separated)"
             default "2.8c"
             help
                 PrintSphere also publishes a build for the ESP32-S3-Touch-LCD-2.8C
                 (printsphere_ota-<tag>-2.8c.bin) with the same project_name.
         config BASECAMP_SLOT0_BOARD_MARKER
-            string "ota_0 image must contain (board check)"
+            string "default app 1 image must contain (board check)"
             default "esp32_s3_touch_amoled_1_75"
 
         config BASECAMP_SLOT1_REPO
-            string "ota_1 GitHub repo (owner/repo)"
+            string "default app 2 GitHub repo (owner/repo)"
             default "socquique/capsule-radar"
         config BASECAMP_SLOT1_ASSET_PREFIX
-            string "ota_1 asset name starts with"
+            string "default app 2 asset name starts with"
             default "CapsuleRadar-ota.bin"
         config BASECAMP_SLOT1_ASSET_SUFFIX
-            string "ota_1 asset name ends with"
+            string "default app 2 asset name ends with"
             default ".bin"
         config BASECAMP_SLOT1_PROJECT
-            string "ota_1 project_name must contain"
+            string "default app 2 project_name must contain"
             default "arduino-lib-builder"
             help
                 Capsule Radar is an Arduino build; its descriptor is generic.
         config BASECAMP_SLOT1_ASSET_EXCLUDE
-            string "ota_1 skip assets whose name contains (comma-separated)"
+            string "default app 2 skip assets whose name contains (comma-separated)"
             default ""
         config BASECAMP_SLOT1_BOARD_MARKER
-            string "ota_1 image must contain (board check)"
+            string "default app 2 image must contain (board check)"
             default "CO5300"
 
         config BASECAMP_SLOT2_REPO
-            string "ota_2 GitHub repo (owner/repo)"
+            string "default app 3 GitHub repo (owner/repo)"
             default "skiiirt1983/LyricFlash"
         config BASECAMP_SLOT2_ASSET_PREFIX
-            string "ota_2 asset name starts with"
+            string "default app 3 asset name starts with"
             default "lyricflash-ota.bin"
         config BASECAMP_SLOT2_ASSET_SUFFIX
-            string "ota_2 asset name ends with"
+            string "default app 3 asset name ends with"
             default ".bin"
         config BASECAMP_SLOT2_PROJECT
-            string "ota_2 project_name must contain"
+            string "default app 3 project_name must contain"
             default "lyricflash"
         config BASECAMP_SLOT2_ASSET_EXCLUDE
-            string "ota_2 skip assets whose name contains (comma-separated)"
+            string "default app 3 skip assets whose name contains (comma-separated)"
             default ""
         config BASECAMP_SLOT2_BOARD_MARKER
-            string "ota_2 image must contain (board check)"
+            string "default app 3 image must contain (board check)"
             default "esp32_s3_touch_amoled_1_75"
     endmenu
 

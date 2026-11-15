@@ -4,13 +4,13 @@ Boot launcher for the **Waveshare ESP32-S3-Touch-AMOLED-1.75**
 (ESP32-S3, 16 MB flash, 8 MB octal PSRAM, CO5300 466×466 QSPI AMOLED, CST9217 touch, AXP2101 PMU).
 ESP-IDF **5.5**.
 
-Every power-on shows a round touch menu with three apps. Tapping one boots it.
-The app's own restarts, crashes and deep-sleep wake-ups stay inside that app.
-The next power-on (or a press of the RST button) returns to the menu.
+Every power-on shows a round touch menu with **the apps you have installed (up to three)**. Tapping one
+boots it. The app's own restarts, crashes and deep-sleep wake-ups stay inside that app. The next
+power-on (or a press of the RST button) returns to the menu.
 
-The USB image contains only the bootloader, partition table and launcher. On first boot the
-launcher sets up Wi-Fi and downloads the three apps from their GitHub releases; later it
-updates them through its **Updates** button.
+The apps are not built in. Add them from a phone or laptop through the open Wi-Fi **BaseCamp-Setup**
+that the menu provides (upload a `.bin`, or download it from a GitHub release), and arrange their
+order on a web page. **Your own apps work too:** see [docs/ADD_YOUR_OWN_APP.md](docs/ADD_YOUR_OWN_APP.md).
 
 ```
 power-on ─► custom bootloader ─► cold reset? ──yes──► launcher (factory) ──tap──► STORE0 = slot, esp_restart()
@@ -34,19 +34,37 @@ power-on ─► custom bootloader ─► cold reset? ──yes──► launcher
    - Espressif Flash Download Tool: ESP32-S3, one row with the file at `0x0`, SPI mode DIO,
      80 MHz, DoNotChgBin ticked, START.
    - Browser: https://espressif.github.io/esptool-js/ (Chrome/Edge), Flash Address `0x0`, Program.
-3. Unplug and replug (or press RST). All slots are empty, so setup starts by itself:
-   - **Wi-Fi:** the screen says to join **`Basecamp-Setup`** on a phone. The setup page opens by
-     itself (or browse to `192.168.4.1`). Pick your 2.4 GHz network, enter the password, tap
-     Connect. The credentials are kept in NVS (namespace `basecamp`).
-   - **Download:** one progress ring per app. Each app comes from its GitHub release's newest
-     stable version and is written straight into its slot. Afterwards the launcher restarts into the menu.
+3. Unplug and replug (or press RST). The menu says **No apps yet** and shows the Wi-Fi **BaseCamp-Setup**.
+4. Add apps, either way:
+   - **One tap:** press **Install default apps**. The device asks for your home Wi-Fi (join
+     **BaseCamp-Setup** on your phone, pick your network on the page that opens), then downloads
+     PrintSphere, Capsule Radar and LyricFlash from their GitHub releases.
+   - **Your own:** join **BaseCamp-Setup** (open, no password). The page opens by itself, or browse to
+     `http://192.168.4.1`. Upload a `.bin`, or install from GitHub, and put the cards in order.
 
-To replace only the launcher and keep the apps and their settings, flash
-**`Basecamp-<version>-launcher-only.bin`** at **0x90000**.
+To replace only the launcher and keep the apps, their order and their settings, flash
+**`Basecamp-<version>-launcher-only.bin`** at **0x90000**. The same file can be flashed again to
+upgrade from an earlier version: it recognises apps installed by 0.2.x and keeps their names.
 
 `tools/flash.sh` does the same with esptool: no arguments flashes the FRESH-INSTALL image,
 `--launcher-only` writes the launcher, and `--offline` also writes the pinned app bins from
 `apps/` (`tools/fetch_apps.sh`, checked against `tools/apps.sha256`) for setups without Wi-Fi.
+
+## Using it
+
+**The menu** has one card per installed app, in the order you chose. Tap to start. A small
+**Updates** button checks GitHub for newer releases of the apps that came from GitHub and installs them
+(settings are kept). A grey card with **⟳ retry** is an install that failed or an image that is damaged:
+tap it to reinstall. Long-press an amber **⚠ changed** card to accept its new content (see
+[Known risks](#known-risks-and-caveats)).
+
+**The web page** (join **BaseCamp-Setup**, then it opens, or `http://192.168.4.1`):
+- list of the apps with name, version, size and slot; a **round preview** of the menu;
+- **▲ ▼** to change the order, **✎** to rename or pick a colour, **⟳** to update from GitHub, **✕** to remove;
+- **Add an app:** upload a `.bin` (checked before anything is erased), or install from a GitHub repo;
+- **Wi-Fi for GitHub downloads:** pick or type your network.
+
+Changes show on the device straight away. The setup network switches off when an app starts.
 
 ## Layout
 
@@ -55,12 +73,19 @@ To replace only the launcher and keep the apps and their settings, flash
 | `partitions.csv` | Fixed partition table (see below) |
 | `bootloader_components/main/` | Custom 2nd-stage bootloader entry (`call_start_cpu0` override) |
 | `common/include/basecamp_bootsel.h` | Selection-word contract shared by bootloader and apps |
-| `main/` | Factory launcher: UI, slot scan + overwrite guard (`slots.c`), Wi-Fi + setup portal (`netmgr.c`), GitHub installer (`installer.c`) |
+| `main/main.c` | Launcher controller: busy state, install jobs with retries, Wi-Fi gate, launching |
+| `main/slots.c`, `main/meta.c` | Slot scan (state, overwrite guard, legacy migration) and per-slot metadata in NVS |
+| `main/swriter.c` | Slot writer shared by uploads and downloads (validates before erasing) |
+| `main/installer.c` | GitHub release lookup + download |
+| `main/webui.c`, `main/webui.html` | Web server and the single-page web UI |
+| `main/netmgr.c` | Open setup access point, captive DNS, on-demand station connection |
+| `main/ui.c` | Round LVGL UI (menu, progress, updates) |
+| `main/apps_logic.c` | Pure helpers (order, names, image-header check, marker search): host-tested |
 | `components/board/` | Board bring-up: AXP2101, CO5300, CST9217, LVGL port |
-| `.github/workflows/firmware.yml` | CI build, QEMU self-test, release images |
-| `test_apps/dummy_app/` | Dummy OTA app with a UI, for testing slot selection on hardware |
-| `test_apps/qemu_selftest/` | Headless automated test of the bootloader logic (QEMU or board) |
-| `tools/` | `ci_build.sh`, `make_images.sh`, `flash.sh`, `qemu_selftest.sh`, `fetch_apps.sh`, `build_dummies.sh` |
+| `.github/workflows/firmware.yml` | CI build, tests, release images |
+| `test_apps/` | `qemu_selftest` (bootloader), `swriter_selftest` (slot writer/meta/scan), `dummy_app` (by hand on a board) |
+| `tools/` | `ci_build.sh`, `make_images.sh`, `flash.sh`, `host_tests/`, `qemu_*.sh`, `webui_mock.py`, `ui_preview/`, `fetch_apps.sh` |
+| `docs/ADD_YOUR_OWN_APP.md` | How to add an app of your own |
 
 ### Partition table (fixed)
 
@@ -69,11 +94,14 @@ To replace only the launcher and keep the apps and their settings, flash
 | nvs | data | nvs | 0x9000 | 512 KB | shared by launcher + all apps |
 | otadata | data | ota | 0x89000 | 8 KB | erased; **not** used for selection |
 | phy_init | data | phy | 0x8B000 | 4 KB | |
-| launcher | app | factory | 0x90000 | 1 MB | this launcher (~960 KB) |
-| ota_0 | app | ota_0 | 0x190000 | 4 MB | PrintSphere (cptkirki/PrintSphere) |
-| ota_1 | app | ota_1 | 0x590000 | 4 MB | Capsule Radar (socquique/capsule-radar, Arduino) |
-| ota_2 | app | ota_2 | 0x990000 | 4 MB | LyricFlash (skiiirt1983/LyricFlash) |
-| sounds | data | 0x83 (LittleFS) | 0xD90000 | 2.4 MB | erased; LittleFS formats on first mount |
+| launcher | app | factory | 0x90000 | 1 MB | this launcher (~985 KB) |
+| ota_0 | app | ota_0 | 0x190000 | 4 MB | app slot 1 |
+| ota_1 | app | ota_1 | 0x590000 | 4 MB | app slot 2 |
+| ota_2 | app | ota_2 | 0x990000 | 4 MB | app slot 3 |
+| sounds | data | 0x83 (LittleFS) | 0xD90000 | 2.4 MB | shared data partition (PrintSphere uses it) |
+
+The table is fixed, which is why there are three app slots of 4 MB: the number of apps is "however many
+slots are filled", not a list of hard-wired apps.
 
 ## Boot logic
 
@@ -98,87 +126,83 @@ Bootloader decisions (`bootloader_components/main/bootloader_start.c`):
 
 The stock `bootloader_utility_load_boot_image()` falls back to *lower OTA slots* before trying factory when an image fails to load. For example, a broken ota_2 would boot ota_1. So the custom bootloader runs `esp_image_verify()` on the chosen slot first and goes straight to the launcher if that fails. With a factory partition present, the IDF loader never writes otadata, and otadata is never read for selection.
 
-## Launcher
+## How the launcher works
 
-- **Menu:** LVGL 9.4 on a black AMOLED screen. Three stacked pill cards fit inside the circle, with the title and USB/battery status at the top and a small **Updates** button at the bottom.
-- **Cards** show the app name and version from that slot's `esp_app_desc_t`, plus the slot label.
-  - Names come from `project_name` (`printsphere_idf` → PrintSphere, `lyricflash` → LyricFlash; anything unknown is shown as-is), so the menu shows what is *actually* in each slot.
-  - Capsule Radar is an Arduino build whose descriptor only says `arduino-lib-builder`. Its card shows the release tag the launcher installed (or the configured label, marked `*`).
-- **Tap an installed card:** "Starting <app>", the panel blanks, STORE0 is written and the board restarts into the app.
-- **Tap a grey card (empty or failed slot):** that app is installed from GitHub. Wi-Fi setup runs first if needed.
-- **Updates:** checks the three latest releases and lists `current -> available` per app. **Install** downloads the newer ones. Updating a slot doesn't touch NVS, so the app's settings survive.
-
-### Installing from GitHub (`main/installer.c`)
-- `GET https://api.github.com/repos/<repo>/releases/latest` (User-Agent set), then pick the asset by name:
-
-  | Slot | Repo | Asset | `project_name` must contain |
-  |---|---|---|---|
-  | ota_0 | cptkirki/PrintSphere | `printsphere_ota*.bin`, not `*2.8c*` | `printsphere` |
-  | ota_1 | socquique/capsule-radar | `CapsuleRadar-ota.bin` | `arduino-lib-builder` (Arduino) |
-  | ota_2 | skiiirt1983/LyricFlash | `lyricflash-ota.bin` | `lyricflash` |
-
-  All of these are Kconfig options (`menuconfig → Basecamp launcher → App sources`).
-- **Board check:** PrintSphere publishes one build for this board (`printsphere_ota-<tag>.bin`) and one for the ESP32-S3-Touch-LCD-2.8C (`…-2.8c.bin`). Both have the same `project_name`, so the 2.8C asset is excluded by name. On top of that, every image must contain a per-slot marker string: `esp32_s3_touch_amoled_1_75` for PrintSphere and LyricFlash, `CO5300` for Capsule Radar.
-  - The marker is checked while downloading, and again for installed slots when the menu starts.
-  - A wrong-board image is rejected, or shows as a grey "wrong board" card that can be tapped to reinstall.
-- **Checks:**
-  - Assets larger than the 4 MB slot are rejected.
-  - The download uses the API asset URL (`api.github.com/repos/<repo>/releases/assets/<id>` with `Accept: application/octet-stream`), which redirects to `release-assets.githubusercontent.com`, verified against the IDF CA bundle. The `github.com/.../releases/download/...` route is only a fallback: in testing it often answered 504 after about 11 s, while the API route answered in under a second.
-  - HTTP 5xx/429 responses, timeouts and dropped connections are retried automatically (4 attempts, with 3 s, 6 s and 9 s pauses). A failure before the first byte is written leaves an installed app untouched.
-  - It is streamed into the slot with `esp_ota_begin/write/end` on that partition. **`esp_ota_set_boot_partition` is never called.**
-  - The SHA-256 is checked against the asset's `digest` when GitHub provides one. `esp_ota_end` verifies the image, and `project_name` is checked afterwards.
-- **On success:** the release tag is saved in NVS (`tag0`..`tag2`) and the overwrite guard is re-baselined.
-- **On any failure:** the slot is blanked, so it shows as empty and can be retried. A failed *update* therefore also removes the old version of that app until a retry succeeds.
-
-### Hardware bring-up
-- **AXP2101:** makes sure DCDC1 (`VCC3V3`, the SoC rail) is on, sets ALDO1/ALDO2 (`VL1_3.3V`/`VL2_3.3V`; ALDO1 is `A3V3`, which feeds the ES7210 mic ADC) to 3.3 V and on, and enables the battery/VBUS ADC and fuel gauge. All other rails keep their OTP defaults.
-- **Display and touch:** `espressif/esp_lcd_co5300` + `waveshare/esp_lcd_touch_cst9217` + `esp_lvgl_port`. The init table, 6-px column gap, even-pixel rounder and touch mirroring come from Waveshare's BSP (v3.0.1).
+- **Apps are discovered, not configured.** At start-up each of the three slots is read: is there a valid
+  app image (`esp_image_verify`), what is its `esp_app_desc_t`? Cards are drawn for what is found, in the
+  order stored in NVS.
+- **Metadata** lives in NVS namespace `basecamp`: `name<i>`, `col<i>` (colour), `src<i>` (GitHub source),
+  `tag<i>` (installed release), `sha<i>` (overwrite-guard baseline), `ord` (display order), `ssid`/`pass`.
+  A slot flashed some other way (esptool, an older launcher) is named from its `project_name`.
+- **Slot writer** (`swriter.c`): the first 64 bytes of a file are checked (ESP image, ESP32-S3, app
+  descriptor present) **before the slot is erased**, so a wrong file never destroys the app that is
+  there. Then it streams with `esp_ota_begin/write/end` (never `esp_ota_set_boot_partition`), the image
+  hash is verified by `esp_ota_end`, and a failure blanks the slot rather than leaving half an image.
+- **GitHub installs:** `GET /repos/<repo>/releases/latest`, pick the asset by name rules, download through
+  the API asset URL (redirects to `release-assets.githubusercontent.com`, checked against the IDF CA
+  bundle), check size, the SHA-256 `digest` GitHub publishes, an optional board marker and the app's
+  `project_name`. Network hiccups (5xx, timeouts) are retried automatically (4 attempts).
+- **Web server:** every `POST` needs the header `X-Basecamp: 1`. Browsers only let another web page send
+  a custom header after a CORS preflight, which the device never answers, so other sites can't drive it.
+- **AXP2101:** makes sure DCDC1 (`VCC3V3`, the SoC rail) is on, sets ALDO1/ALDO2 to 3.3 V and on
+  (ALDO1 is `A3V3`, feeding the microphone ADC), and enables the battery/VBUS ADC and fuel gauge. Other
+  rails keep their defaults.
+- **Display and touch:** `espressif/esp_lcd_co5300` + `waveshare/esp_lcd_touch_cst9217` + `esp_lvgl_port`;
+  init table, column gap, even-pixel rounder and touch mirroring from Waveshare's BSP (v3.0.1).
 
 ### Size budget (factory partition = 1 MB)
-The launcher is about **960 KB** (CI prints `idf.py size` and fails above 1 MB). To fit Wi-Fi, TLS and LVGL, `sdkconfig.defaults` sets:
-- `-Os`, warning-level logs, silent asserts, ROM nano printf;
-- client-only TLS 1.2 with the common CA bundle and only the ciphers and curves GitHub needs;
-- no WPA3, enterprise Wi-Fi or IPv6;
-- only the LVGL widgets in use (label, button, arc), with RGB565/A8/ARGB8888 rendering.
+The launcher is about **985 KB** (CI prints `idf.py size` and fails above 1 MB). To fit Wi-Fi, TLS, a web
+server and LVGL, `sdkconfig.defaults` sets: `-Os`; warning-level logs; silent asserts; ROM nano printf;
+client-only TLS 1.2 with the common CA bundle; no WPA3, enterprise Wi-Fi or IPv6; only the LVGL widgets
+in use (label, button, arc) with RGB565/A8/ARGB8888 rendering. About 40 KB remain.
 
 ## Build and CI
 
-GitHub Actions (`.github/workflows/firmware.yml`, `espressif/esp-idf-ci-action`, ESP-IDF v5.5.6) runs `tools/ci_build.sh` on every push and pull request. It builds the launcher and custom bootloader, prints `idf.py size`, runs the QEMU bootloader self-test, and packages:
+GitHub Actions (`.github/workflows/firmware.yml`, `espressif/esp-idf-ci-action`, ESP-IDF v5.5.6) runs
+`tools/ci_build.sh` on every push and pull request: host unit tests, launcher + custom bootloader build,
+`idf.py size`, packaging, and two QEMU self-tests. It uploads:
 - `Basecamp-<ver>-FRESH-INSTALL-USB.bin` (16 MB, flash at 0x0);
 - `Basecamp-<ver>-launcher-only.bin` (flash at 0x90000);
 - `SHA256SUMS.txt`.
 
-Every run uploads these as artifacts. On `main`, a version without a suffix (`PROJECT_VER` in `CMakeLists.txt`) also publishes the GitHub Release `v<ver>`.
+On `main`, a version without a suffix (`PROJECT_VER` in `CMakeLists.txt`) also publishes the GitHub
+Release `v<ver>`.
 
-Locally (ESP-IDF v5.5.x): `idf.py build && tools/make_images.sh`, or `tools/ci_build.sh` for the whole CI sequence.
+Locally (ESP-IDF v5.5.x): `idf.py build && tools/make_images.sh`, or `tools/ci_build.sh` for the whole sequence.
 
 ## Tests
 
-`tools/qemu_selftest.sh` boots the **real custom bootloader** in Espressif QEMU, with one test binary in factory and all three OTA slots. It checks:
-- a cold boot goes to the launcher;
-- each slot boots when selected and stays put through `esp_restart()` and a panic;
-- clearing the word goes back to the launcher;
-- an erased ota_2 falls back to the **launcher, not ota_1**;
-- a corrupt word goes to the launcher.
+| Test | Run | What it covers |
+|---|---|---|
+| Host unit tests | `tools/host_tests/run.sh [apps/]` | order logic, name/JSON/URL helpers, image-header check, board-marker search (also against the real app images) |
+| QEMU bootloader test | `tools/qemu_selftest.sh` | the **real custom bootloader**: cold boot → launcher; each slot boots and survives restart + panic; an erased slot falls back to the launcher, not to a neighbour; a corrupt selection word is ignored |
+| QEMU slot-writer test | `tools/qemu_swriter_test.sh` | real image written into a slot in many chunk sizes; non-ESP files, bootloader images, wrong-chip images rejected **without erasing**; truncated/corrupt images blanked; NVS metadata; slot scan (damaged, retry card, erase) |
+| Web page vs a device mock | `NODE_PATH=<dir with playwright> node tools/webui_test.js` (or `python3 tools/webui_mock.py` and open the page) | ordering, rename, upload/replace/reject, GitHub job progress, Wi-Fi, hostile names, missing-header refusal |
+| Round-screen preview | `tools/ui_preview/run.sh` | compiles LVGL + the real `ui.c` for the PC and renders every screen into the 466 px circle |
 
-QEMU doesn't emulate deep-sleep wake-up, so that step only runs with `-DSELFTEST_DEEP_SLEEP=1` (on a board). QEMU has no Wi-Fi either, so the setup portal and the GitHub installer can only be tested on hardware.
+QEMU has no Wi-Fi and no emulated display, so the access point, the web server, the GitHub download and
+the real screen can only be tested on the board.
 
-`test_apps/dummy_app` (`tools/build_dummies.sh`) is a small app for checking slot selection on a board by hand (Restart / Crash / Sleep buttons).
+`test_apps/dummy_app` (`tools/build_dummies.sh`) is a small app for checking slot selection on a board
+by hand (Restart / Crash / Sleep buttons).
 
 ## ⚠️ Known risks and caveats
 
-### Update through the launcher's Updates button, not inside the apps
+### Update through the launcher, not inside the apps
 Each app's built-in OTA updater writes to `esp_ota_get_next_update_partition()`, which is the **next** OTA slot. It does not write over itself:
 
 | Updating from | Overwrites |
 |---|---|
-| PrintSphere (ota_0) | **Capsule Radar** (ota_1) |
-| Capsule Radar (ota_1) | **LyricFlash** (ota_2) |
-| LyricFlash (ota_2) | **PrintSphere** (ota_0) |
+| slot 1 (ota_0) | **slot 2** (ota_1) |
+| slot 2 (ota_1) | **slot 3** (ota_2) |
+| slot 3 (ota_2) | **slot 1** (ota_0) |
 
-The app then sets otadata, which this bootloader ignores, and restarts into its **old version**, with a neighbouring app destroyed. The launcher's **Updates** button replaces this: it writes each app into its own slot and keeps its settings.
+The app then sets otadata, which this bootloader ignores, and restarts into its **old version**, with a
+neighbouring app destroyed. The launcher's **Updates** button replaces this: it writes each app into its
+own slot and keeps its settings.
 
-**Guard (detection).** The launcher records each slot's image SHA-256 in NVS (namespace `basecamp`) after installing it, or the first time it sees it.
+**Guard (detection).** The launcher records each slot's image SHA-256 in NVS the first time it sees it, or
+right after an install.
 - If a slot's image later changes, the card shows "⚠ changed" in amber and names whatever is really there now.
 - Long-press the card to accept the new image as the baseline.
 
@@ -188,17 +212,21 @@ The app then sets otadata, which this bootloader ignores, and restarts into its 
 - **Changing the partition table.** The table is fixed.
 
 ### Other caveats
-- **The FRESH-INSTALL image wipes everything,** including every app's settings (Wi-Fi credentials, tokens, preferences) and the launcher's Wi-Fi. To keep settings, flash the launcher-only image at 0x90000 or update apps through **Updates**.
-- **Shared NVS.** All three apps and the launcher share one `nvs` partition. Namespaces usually differ, but IDF Wi-Fi config (`nvs.net80211`) is shared. An app that relies on stored Wi-Fi config may see another app's network.
-- **Wi-Fi:** 2.4 GHz WPA/WPA2 (or open) networks only. WPA3-only networks are not supported, to keep the launcher under 1 MB. Unauthenticated GitHub API calls are limited to 60 per hour per IP address.
+- **The setup Wi-Fi is open (no password) by design.** While the menu is showing, anyone within range can
+  use the page, including uploading firmware. It is off whenever an app is running. Don't leave the
+  device on the menu somewhere you don't trust.
+- **Three apps, 4 MB each.** The partition table is fixed.
+- **A replaced app is gone.** Uploading or downloading into an occupied slot erases it as soon as the
+  new file has passed its header check, and there is no spare slot to fall back to. If the transfer then
+  fails, the slot is left empty; a GitHub app keeps a grey "retry" card.
+- **The FRESH-INSTALL image wipes everything,** including every app's settings (Wi-Fi credentials, tokens, preferences) and the launcher's Wi-Fi. To keep settings, flash the launcher-only image at 0x90000 or update through **Updates**.
+- **Shared NVS.** All apps and the launcher share one `nvs` partition. Namespaces usually differ, but IDF Wi-Fi config (`nvs.net80211`) is shared. An app that relies on stored Wi-Fi config may see another app's network.
+- **Wi-Fi:** 2.4 GHz WPA/WPA2 (or open) networks only. WPA3-only networks are not supported, to keep the launcher under 1 MB. While the device is connected to your router for a GitHub download, the setup network follows the router's channel, so a phone on it may reconnect once. Unauthenticated GitHub API calls are limited to 60 per hour per IP address.
 - **Crash loops.** An app that crash-loops stays in that app; this is how "restarts stay in the app" works. A power cycle or the RST button always returns to the menu.
-- **`sounds` is used by PrintSphere,** not LyricFlash (PrintSphere mounts LittleFS `sounds`, `/sounds/snd_%u.pcm`). It starts empty.
-- **Capsule Radar** logs `No core dump partition found!` at boot. This is harmless.
-- **Flash mode.** The launcher uses QIO like Waveshare's demos. Espressif QEMU mis-emulates the app-side QIO read. If a board ever shows every slot as "empty" after an install, rebuild with `CONFIG_ESPTOOLPY_FLASHMODE_DIO=y`.
+- **Flash mode.** The launcher uses QIO like Waveshare's demos. Espressif QEMU mis-emulates the app-side QIO read. If a board ever shows every slot as damaged after an install, rebuild with `CONFIG_ESPTOOLPY_FLASHMODE_DIO=y`.
 
 ## Verification status
-- ✅ **On hardware (0.1.x):** the menu boots each of the three apps; the dummy-app restart/crash/sleep checks pass; a power cycle returns to the menu.
-- ✅ **QEMU (every CI run):** the bootloader decisions listed above.
-- ✅ **CI/local build:** the launcher fits (about 960 KB of 1 MB). The FRESH-INSTALL image has the launcher in place and nvs, otadata, ota_0–2 and sounds erased (checked by `make_images.sh`).
-- ✅ **GitHub API response format** (asset names, `digest`, redirect to `release-assets.githubusercontent.com`) checked against LyricFlash's live release.
-- ⏳ **Not yet tested on hardware (0.2.0):** the Wi-Fi setup portal, downloading and installing from GitHub, the Updates screen, and the new menu layout.
+- ✅ **On hardware (0.1.x–0.2.x):** the menu boots each of three apps; the dummy-app restart/crash/sleep checks pass; a power cycle returns to the menu; first-boot Wi-Fi setup and GitHub installs worked (including the 504 retry fix).
+- ✅ **CI on every push:** host tests, the build (launcher under 1 MB), packaging checks, both QEMU self-tests.
+- ✅ **Off-device checks (0.3.0):** the web page against a device mock (25 behaviours), every launcher screen rendered with the real UI code, slot scan of the three real app images in QEMU.
+- ⏳ **Not yet tested on hardware (0.3.0):** the open access point and captive portal, the web server (uploads over Wi-Fi), the dynamic menu on the real display, and the launcher-only upgrade from 0.2.x.
