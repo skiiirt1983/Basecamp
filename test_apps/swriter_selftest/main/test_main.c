@@ -237,10 +237,16 @@ static void test_slots(void)
     CHECK(s.state == SLOT_EMPTY && s.has_src && slots_has_card(&s) && !strcmp(s.name, "Failed One"));
 
     /* corrupt a byte inside the stored image: reported as damaged, not bootable */
+    /* Flash writes can only clear bits, so pick a byte that still has a bit set to clear
+     * (a fixed bit would be a no-op for some builds). */
+    uint32_t at = s_len / 2;
     uint8_t b;
-    esp_partition_read(P(1), s_len / 2, &b, 1);
-    b &= 0x7F;                                                             /* flash can only clear bits */
-    esp_partition_write(P(1), s_len / 2, &b, 1);
+    do {
+        esp_partition_read(P(1), at, &b, 1);
+        at++;
+    } while (b == 0);
+    b &= (uint8_t)(b - 1);                                                 /* clear the lowest set bit */
+    esp_partition_write(P(1), at - 1, &b, 1);
     slots_scan_one(1);
     slots_get(1, &s);
     CHECK(s.state == SLOT_DAMAGED && slots_has_card(&s));
