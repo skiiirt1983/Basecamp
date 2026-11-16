@@ -139,9 +139,12 @@ behind its back with an amber **⚠ changed** on the card.
 ### Name and version on the card
 The card shows the name you gave on the web page. If you didn't give one, it is made from the app's
 `project_name` (`my_cool_app` → "My Cool App"). The version line is the app's `version` (set
-`PROJECT_VER` in your top-level `CMakeLists.txt` for ESP-IDF projects).
+`PROJECT_VER` in your top-level `CMakeLists.txt` for ESP-IDF projects), unless you typed a version on the
+web page, which wins.
 
-Arduino-ESP32 builds all report the project name `arduino-lib-builder`, so name them on the web page.
+Arduino-ESP32 builds all report the project name `arduino-lib-builder` and a core build hash as their
+version, so name them (and give a version) on the web page; BaseCamp shows no version for them until
+you do.
 
 ## 4. Building the right file
 
@@ -187,7 +190,28 @@ reset (power-on, RST, brown-out) the register is cleared and the launcher starts
 | Black screen after tapping | The app didn't initialise the display/power. Power-cycle to return to the menu. |
 | Page doesn't open | No home Wi-Fi saved: join **BaseCamp-Setup** (no password), then browse to `http://192.168.4.1`. Home Wi-Fi saved: be on that same network and open the address shown under the title on the device. If the device says `… not found - join BaseCamp-Setup`, it could not find your saved network: join BaseCamp-Setup and correct it. Some phones silently stay on mobile data: turn it off. |
 
-## 7. A word on security
+## 7. Worked example: TamaPoke
+
+[TamaPoke](https://github.com/socquique/TamaPoke) (a Pokémon-style tamagotchi for this board, an Arduino
+sketch) works as it is; its own project already publishes the app-only image.
+
+1. Get the file: `web/firmware/app.bin` in that repository, direct link
+   `https://github.com/socquique/TamaPoke/raw/main/web/firmware/app.bin` (about 906 KB, built for
+   ESP32-S3, 16 MB flash, octal PSRAM). Don't use its `tamapoke.bin` / `bootloader.bin` /
+   `partitions.bin`: those belong to its own stand-alone install.
+2. In the BaseCamp page: **Add an app → Upload .bin**, choose the file, name it **TamaPoke**, and put its
+   version (for example `1.21`) in *Version shown on the card* (Arduino images report a build hash, not
+   the sketch's version). Pick a colour and press **Upload**.
+3. **Sprites:** TamaPoke loads its Pokémon from the microSD card. Fill the card with TamaPoke's own
+   installer ("Load sprites" on its web installer, or `tools/send_sd.py`); BaseCamp doesn't touch the card.
+4. **Check list:** it needs only the shared `nvs` partition (own namespace; its "new game" clears only
+   that), uses light sleep (stays in the app), and does its own power, display, touch, RTC and audio
+   set-up. Nothing about it needs BaseCamp's partition layout to change.
+5. **Getting back to the menu:** TamaPoke has no "home" button. Use RST or a power cycle, which always
+   returns to the BaseCamp menu. When TamaPoke powers the board off on a flat battery, the next
+   power-on also opens the BaseCamp menu, so tap TamaPoke again.
+
+## 8. A word on security
 
 The page has no password. Until a home Wi-Fi is saved, the setup network is open by design, so that
 nothing needs to be typed to get started, and **anyone within range can use the page while the menu is

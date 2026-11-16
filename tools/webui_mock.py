@@ -20,7 +20,7 @@ def slot(i, name="", ver="", proj="", col="", src="", size=0, st="empty"):
                 tag="", src=src, col=col or ["ff7a1a", "18c8b0", "c850f0"][i], chg=False, size=size)
 
 STATE = dict(
-    v="0.3.0-mock", busy=False,
+    v="0.3.3-mock", boot="power-on (before: restart)", busy=False,
     slots=[slot(0, "PrintSphere", "v1.6.2", "printsphere_idf", src="cptkirki/PrintSphere", size=2997088, st="app"),
            slot(1, "Capsule Radar", "v1.6.0", "arduino-lib-builder", src="socquique/capsule-radar", size=3015840, st="app"),
            slot(2)],
@@ -97,7 +97,7 @@ class H(BaseHTTPRequestHandler):
                 if STATE["slots"][i]["card"] and q.get("replace") != "1":
                     return self.err(409, "slot %d holds '%s': confirm to replace it" % (i + 1, STATE["slots"][i]["name"]))
                 name = q.get("name") or "Uploaded App"
-                STATE["slots"][i] = slot(i, name, "1.0", "custom", col=q.get("color", "ff7a1a"), size=len(data), st="app")
+                STATE["slots"][i] = slot(i, name, q.get("version") or "", "custom", col=q.get("color", "ff7a1a"), size=len(data), st="app")
                 STATE["order"] = [o for o in STATE["order"] if o != i] + [i]
                 resp = dict(ok=True, slot=i, name=name)
                 if b"co5300" not in data.lower():
@@ -111,6 +111,7 @@ class H(BaseHTTPRequestHandler):
                 s = STATE["slots"][j["slot"]]
                 if j.get("name"): s["name"] = j["name"][:31]
                 if j.get("color"): s["col"] = j["color"]
+                if "version" in j: s["ver"] = j["version"][:31]
                 return self.out(200, {"ok": True})
             if u.path == "/api/delete":
                 STATE["slots"][j["slot"]] = slot(j["slot"]); return self.out(200, {"ok": True})

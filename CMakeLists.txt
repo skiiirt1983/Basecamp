@@ -1,6 +1,6 @@
 # SLOPEFORM / Project Basecamp - factory launcher + custom bootloader
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "0.3.2")
+set(PROJECT_VER "0.3.3")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(basecamp_launcher)

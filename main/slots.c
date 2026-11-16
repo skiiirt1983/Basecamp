@@ -178,10 +178,16 @@ static void scan_into(int i, basecamp_slot_t *s)
     s->state = SLOT_APP;
     check_baseline(i, s, digest);
     /* Version: the descriptor's, except for generic (Arduino) descriptors where the release tag is better. */
-    if (s->generic_desc && s->tag[0]) {
+    if (s->generic_desc) {
+        /* Arduino builds report a core build hash as the version: not meaningful, so use the release
+         * tag if we have one, else nothing. */
         strlcpy(s->version, s->tag, sizeof(s->version));
     } else {
         strlcpy(s->version, s->desc.version, sizeof(s->version));
+    }
+    char label[32];
+    if (meta_get_ver(i, label)) {                      /* a label typed on the web page wins */
+        strlcpy(s->version, label, sizeof(s->version));
     }
     snprintf(s->detail, sizeof(s->detail), "%.31s", s->desc.project_name);
     ESP_LOGI(TAG, "%s @0x%06" PRIx32 ": %s %s (project '%s', IDF %s)", s->part->label, s->part->address,

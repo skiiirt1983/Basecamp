@@ -136,6 +136,7 @@ static esp_err_t h_state(httpd_req_t *req)
     slots_get_all(all);
     cJSON *j = cJSON_CreateObject();
     cJSON_AddStringToObject(j, "v", esp_app_get_description()->version);
+    cJSON_AddStringToObject(j, "boot", ctl_boot_info());
     cJSON_AddBoolToObject(j, "busy", ctl_busy());
 
     cJSON *arr = cJSON_AddArrayToObject(j, "slots");
@@ -219,6 +220,8 @@ static esp_err_t h_upload(httpd_req_t *req)
     if (query_get(req, "name", tmp, sizeof tmp)) apps_sanitize_name(tmp, name, sizeof name);
     long color = -1;
     if (query_get(req, "color", tmp, sizeof tmp)) color = apps_parse_color(tmp);
+    char ver[32] = "";
+    if (query_get(req, "version", tmp, sizeof tmp)) apps_sanitize_name(tmp, ver, sizeof ver);
 
     size_t len = req->content_len;
     if (len < APPS_HDR_NEEDED) return send_err(req, "400 Bad Request", "empty or too small file");
@@ -284,6 +287,7 @@ static esp_err_t h_upload(httpd_req_t *req)
     if (name[0]) strlcpy(shown, name, sizeof shown);
     else apps_prettify(res.desc.project_name, shown, sizeof shown);
     meta_set_name(slot, shown);
+    if (ver[0]) meta_set_ver(slot, ver);
     if (color >= 0) meta_set_color(slot, (uint32_t)color);
     meta_move_to_end(slot);
     sw_done();
@@ -348,9 +352,13 @@ static esp_err_t h_rename(httpd_req_t *req)
     char name[32];
     apps_sanitize_name(jstr(j, "name"), name, sizeof name);
     long color = apps_parse_color(jstr(j, "color"));
+    bool has_ver = cJSON_HasObjectItem(j, "version");
+    char ver[32];
+    apps_sanitize_name(jstr(j, "version"), ver, sizeof ver);
     cJSON_Delete(j);
     if (slot < 0 || slot >= APPS_MAX) return send_err(req, "400 Bad Request", "bad slot");
     if (!ctl_begin()) return send_err(req, "409 Conflict", "the device is busy");
+    if (has_ver) meta_set_ver(slot, ver);               /* empty clears the label */
     if (name[0]) meta_set_name(slot, name);
     if (color >= 0) meta_set_color(slot, (uint32_t)color);
     slots_scan_one(slot);

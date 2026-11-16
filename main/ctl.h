@@ -23,6 +23,9 @@ void ctl_job_get(ctl_job_t *out);
 /* Metadata or slots changed: rescan and redraw the menu if it is showing. */
 void ctl_menu_changed(void);
 
+/* Why the launcher last started, e.g. "power-on (before: brown-out)". */
+const char *ctl_boot_info(void);
+
 /* Wi-Fi credentials were saved or forgotten: join the home network and switch the setup
  * network off (or bring it back when there is no usable saved network). Returns at once. */
 void ctl_wifi_changed(void);

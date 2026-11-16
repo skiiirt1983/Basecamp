@@ -61,6 +61,53 @@ static SemaphoreHandle_t s_job_mtx;
 static char s_footer[48];
 static int s_up_slot = -1;
 
+/* ---------- why did we (re)start? ---------- */
+
+static char s_boot_text[80];
+
+static const char *reason_name(int r)
+{
+    switch (r) {
+    case ESP_RST_POWERON:   return "power-on";
+    case ESP_RST_EXT:       return "reset button";
+    case ESP_RST_SW:        return "restart";
+    case ESP_RST_PANIC:     return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:       return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT:  return "brown-out";
+    case ESP_RST_USB:       return "USB";
+    default:                return "other";
+    }
+}
+
+/* Keep this start's reason and the previous one in NVS: a quick reset right after power-on then shows
+ * up on the web page ("brown-out", "crash", ...) instead of being a mystery. */
+static void record_boot(void)
+{
+    int cur = esp_reset_reason();
+    uint8_t prev = 255;
+    nvs_handle_t h;
+    if (nvs_open("basecamp", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_get_u8(h, "rst0", &prev);
+        nvs_set_u8(h, "rst0", (uint8_t)cur);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    if (prev == 255) {
+        snprintf(s_boot_text, sizeof(s_boot_text), "%s", reason_name(cur));
+    } else {
+        snprintf(s_boot_text, sizeof(s_boot_text), "%s (before: %s)", reason_name(cur), reason_name(prev));
+    }
+    ESP_LOGI(TAG, "start: %s", s_boot_text);
+}
+
+const char *ctl_boot_info(void)
+{
+    return s_boot_text;
+}
+
 /* ---------- busy state / job status (ctl.h) ---------- */
 
 bool ctl_begin(void)
@@ -163,10 +210,7 @@ void ctl_upload_finished(void)
 /* The line under the title: the setup network, or the home network and this device's address. */
 static void set_hint(const char *text)
 {
-    ui_set_hint(text);
-    if (ui_menu_visible()) {
-        show_menu();
-    }
+    ui_set_hint(text);                         /* in place: no menu rebuild */
 }
 
 static void hint_home(void)
@@ -219,6 +263,7 @@ static volatile bool s_wifi_busy, s_wifi_again;
 
 static void wifi_task(void *arg)
 {
+    vTaskDelay(pdMS_TO_TICKS(1000));           /* let the first frame and the supply settle before the radio starts */
     do {
         s_wifi_again = false;
         apply_wifi_mode();
@@ -648,6 +693,7 @@ void app_main(void)
         ESP_LOGW(TAG, "nvs_flash_init: %s - app names, order and settings unavailable", esp_err_to_name(err));
     }
 
+    record_boot();
     s_job_mtx = xSemaphoreCreateMutex();
     s_job.slot = -1;
     slots_init();

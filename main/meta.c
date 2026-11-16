@@ -51,6 +51,21 @@ esp_err_t meta_set_name(int slot, const char *name)
     return set_str(k, clean);
 }
 
+bool meta_get_ver(int slot, char out[32])
+{
+    char k[12];
+    key(k, sizeof k, "ver", slot);
+    return get_str(k, out, 32) && out[0];
+}
+
+esp_err_t meta_set_ver(int slot, const char *ver)
+{
+    char k[12], clean[32];
+    key(k, sizeof k, "ver", slot);
+    if (!ver || !apps_sanitize_name(ver, clean, sizeof clean)) return set_str(k, NULL);
+    return set_str(k, clean);
+}
+
 uint32_t meta_get_color(int slot)
 {
     nvs_handle_t h;
@@ -164,7 +179,7 @@ void meta_move_to_end(int slot)
 void meta_clear_slot(int slot)
 {
     char k[12];
-    static const char *const bases[] = {"name", "col", "src", "tag", "sha"};
+    static const char *const bases[] = {"name", "col", "src", "tag", "sha", "ver"};
     nvs_handle_t h;
     if (nvs_open(NS, NVS_READWRITE, &h) != ESP_OK) return;
     for (size_t i = 0; i < sizeof bases / sizeof bases[0]; i++) {

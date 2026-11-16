@@ -210,7 +210,12 @@ static void test_meta(void)
     CHECK(meta_set_order(want) == ESP_OK); meta_get_order(o); CHECK(o[0] == 2 && o[1] == 0 && o[2] == 1);
     meta_move_to_end(2); meta_get_order(o); CHECK(o[0] == 0 && o[1] == 1 && o[2] == 2);
 
+    CHECK(!meta_get_ver(2, s));
+    CHECK(meta_set_ver(2, "  1.21  ") == ESP_OK && meta_get_ver(2, s) && !strcmp(s, "1.21"));
+    CHECK(meta_set_ver(2, "") == ESP_OK && !meta_get_ver(2, s));
+    meta_set_ver(2, "9.9");
     meta_clear_slot(2);
+    CHECK(!meta_get_ver(2, s));
     CHECK(!meta_get_name(2, s) && !meta_get_src(2, &got) && meta_get_color(2) == 0xC850F0);
     meta_get_tag(2, s); CHECK(!s[0]);
     meta_clear_slot(1);
@@ -225,6 +230,13 @@ static void test_slots(void)
     slots_get(1, &s);
     CHECK(s.state == SLOT_APP && !strcmp(s.name, "Basecamp Swtest"));      /* name made from project_name */
     CHECK(!s.has_src && !s.changed && s.image_len == s_len);
+    meta_set_ver(1, "7.7");                                                  /* a typed label wins over the app's own version */
+    slots_scan_one(1);
+    slots_get(1, &s);
+    CHECK(!strcmp(s.version, "7.7"));
+    meta_set_ver(1, "");
+    slots_scan_one(1);
+    slots_get(1, &s);
     slots_get(2, &s);
     CHECK(s.state == SLOT_EMPTY && slots_first_free() == 2);
     CHECK(slots_card_mask() == ((1u << 0) | (1u << 1)));                    /* ota_0 holds the source app too */

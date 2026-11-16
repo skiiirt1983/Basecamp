@@ -32,6 +32,7 @@ static int s_ncards;
 static char s_hint[64] = "";
 
 static lv_obj_t *s_menu_scr;
+static lv_obj_t *s_hint_lbl;      /* the line under the title: updated in place, no screen rebuild */
 static lv_obj_t *s_footer;
 static lv_obj_t *s_busy;
 
@@ -60,7 +61,7 @@ static lv_obj_t *new_screen(void)
     /* Per-screen widgets die with the old screen; forget them. */
     memset(s_ring, 0, sizeof(s_ring));
     memset(s_rows, 0, sizeof(s_rows));
-    s_footer = s_status = s_action = s_busy = s_menu_scr = NULL;
+    s_footer = s_status = s_action = s_busy = s_menu_scr = s_hint_lbl = NULL;
     return scr;
 }
 
@@ -144,6 +145,12 @@ void ui_set_apps(const basecamp_slot_t slots[APPS_MAX], const uint8_t order[APPS
 void ui_set_hint(const char *text)
 {
     strlcpy(s_hint, text, sizeof(s_hint));
+    LOCK();
+    /* Change the text only: rebuilding the whole menu makes the panel visibly flash. */
+    if (s_hint_lbl && s_menu_scr && s_menu_scr == lv_screen_active()) {
+        lv_label_set_text_fmt(s_hint_lbl, LV_SYMBOL_WIFI "  %s", s_hint[0] ? s_hint : "Wi-Fi unavailable");
+    }
+    UNLOCK();
 }
 
 static void card_click_cb(lv_event_t *e)
@@ -212,6 +219,7 @@ void ui_show_menu(void)
     one_line(hint, &lv_font_montserrat_14, 330);
     lv_label_set_text_fmt(hint, LV_SYMBOL_WIFI "  %s", s_hint[0] ? s_hint : "Wi-Fi unavailable");
     lv_obj_align(hint, LV_ALIGN_CENTER, 0, -158);
+    s_hint_lbl = hint;
 
     if (s_ncards == 0) {
         lv_obj_t *t = label(scr, &lv_font_montserrat_28, 0xFFFFFF, "No apps yet");

@@ -62,11 +62,12 @@ tap it to reinstall. Long-press an amber **⚠ changed** card to accept its new 
 **The web page** (join **BaseCamp-Setup**, then it opens, or `http://192.168.4.1`; once your home Wi-Fi is
 saved, open the address shown under the title on the device):
 - list of the apps with name, version, size and slot; a **round preview** of the menu;
-- **▲ ▼** to change the order, **✎** to rename or pick a colour, **⟳** to update from GitHub, **✕** to remove;
+- **▲ ▼** to change the order, **✎** to rename, recolour or (for apps you uploaded) set the version shown, **⟳** to update from GitHub, **✕** to remove;
 - **Add an app:** upload a `.bin` (checked before anything is erased), or install from a GitHub repo;
 - **Wi-Fi:** pick or type your home network.
 
-Changes show on the device straight away.
+Changes show on the device straight away. The bottom of the page says why the launcher last started
+(`power-on`, `brown-out`, `crash`, ...), which helps when the device seems to reset by itself.
 
 **Wi-Fi modes.** The line under the title on the menu says which one is active:
 - **No Wi-Fi saved:** the open setup network **BaseCamp-Setup** is on (`BaseCamp-Setup - 192.168.4.1`).
@@ -99,7 +100,7 @@ Everything switches off when an app starts.
 | `.github/workflows/firmware.yml` | CI build, tests, release images |
 | `test_apps/` | `qemu_selftest` (bootloader), `swriter_selftest` (slot writer/meta/scan), `dummy_app` (by hand on a board) |
 | `tools/` | `ci_build.sh`, `make_images.sh`, `flash.sh`, `host_tests/`, `qemu_*.sh`, `webui_mock.py`, `ui_preview/`, `fetch_apps.sh` |
-| `docs/ADD_YOUR_OWN_APP.md` | How to add an app of your own |
+| `docs/ADD_YOUR_OWN_APP.md` | How to add an app of your own (with TamaPoke as a worked example) |
 
 ### Partition table (fixed)
 

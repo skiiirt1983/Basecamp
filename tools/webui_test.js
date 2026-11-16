@@ -57,11 +57,14 @@ const ok = (c, m) => { if (!c) { problems.push(m); console.log('FAIL:', m); } el
   // upload a real app image into the free slot
   await page.setInputFiles('#file', SP + '/app_with_display.bin');
   await page.fill('#nname', 'My Uploaded');
+  await page.fill('#nver', '1.21');
   ok((await page.textContent('#go')).trim() === 'Upload', 'free slot selected: plain Upload button');
   await page.click('#go');
   await page.waitForFunction(() => document.querySelectorAll('#apps .row').length === 3, null, { timeout: 8000 });
   ok(JSON.stringify(await names()) === JSON.stringify(['Capsule Radar', 'Print Sphere Pro', 'My Uploaded']), 'uploaded app appears last');
   ok((await msg()).includes('Installed My Uploaded') && !(await msg()).includes('CO5300'), 'success message shown, no warning for an image with a display driver');
+  ok((await page.textContent('#apps .row:nth-child(3) .meta')).includes('1.21'), 'the version label typed on upload is shown on the app');
+  ok((await page.textContent('#boot')).includes('Last start: power-on'), 'the last-start line is shown');
   await page.screenshot({ path: SP + '/shots/2_three_apps.png', fullPage: true });
 
   // replace flow needs confirmation

@@ -1,6 +1,7 @@
 /*
  * Per-slot metadata in NVS namespace "basecamp":
  *   name<i>  display name        col<i>  accent colour (u32 RGB)
+ *   ver<i>   version label (for apps whose own version is useless, e.g. Arduino builds)
  *   src<i>   GitHub source       tag<i>  installed release tag
  *   sha<i>   overwrite-guard baseline (see slots.c)
  *   ord      display order (3 bytes, a permutation of the slot numbers)
@@ -23,6 +24,8 @@ typedef struct {
 
 bool meta_get_name(int slot, char out[32]);
 esp_err_t meta_set_name(int slot, const char *name);
+bool meta_get_ver(int slot, char out[32]);                    /* optional version label set by the user */
+esp_err_t meta_set_ver(int slot, const char *ver);            /* NULL or "" clears */
 uint32_t meta_get_color(int slot);                    /* stored colour or the slot default */
 esp_err_t meta_set_color(int slot, uint32_t rgb);
 bool meta_get_src(int slot, inst_source_t *out);

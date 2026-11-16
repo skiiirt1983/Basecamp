@@ -58,6 +58,7 @@ a{color:var(--acc)}[hidden]{display:none!important}
  <label>Slot</label><select id="slot"></select>
  <div id="up">
   <label>App file (app-only OTA .bin, ESP32-S3, up to 4 MB)</label><input type="file" id="file" accept=".bin,application/octet-stream">
+  <label>Version shown on the card (optional)</label><input id="nver" maxlength="24" placeholder="e.g. 1.21 (Arduino apps report a meaningless hash)" autocapitalize="none" spellcheck="false">
  </div>
  <div id="gh" hidden>
   <div class="meta" style="margin:4px 0 6px">Downloads the latest release over your Wi-Fi (set it up below). Quick fill:</div>
@@ -87,6 +88,7 @@ a{color:var(--acc)}[hidden]{display:none!important}
  <div class="meta" style="margin-top:8px">Needed for GitHub downloads and updates. Once saved, the device joins this network and the BaseCamp-Setup network switches off; this page is then at the address shown on the device. If the network cannot be found when the device starts, BaseCamp-Setup comes back. 2.4&nbsp;GHz WPA/WPA2 only.</div>
 </div>
 <div class="meta">Adding your own app: see <b>docs/ADD_YOUR_OWN_APP.md</b> in the project repository.</div>
+<div class="meta" id="boot" style="margin-top:6px"></div>
 </main>
 <script>
 const $=s=>document.querySelector(s);
@@ -109,6 +111,7 @@ function shown(){return S.order.filter(i=>S.slots[i].card)}
 
 function render(){
  $('#ver').textContent='v'+S.v;
+ $('#boot').textContent=S.boot?'Last start: '+S.boot:'';
  const sh=shown(),list=$('#apps');list.textContent='';
  $('#none').hidden=sh.length>0;
  sh.forEach((i,pos)=>{
@@ -128,8 +131,10 @@ function render(){
   if(openEdit===i){
    const e=el('div','row');e.style.flexWrap='wrap';
    const n=el('input');n.value=s.name;n.maxLength=31;const c=el('input');c.type='color';c.value=hex(s.col);c.style.width='54px';
-   const sv=el('button','pri','Save');sv.onclick=async()=>{try{await api('/api/rename',{slot:i,name:n.value,color:c.value.slice(1)});openEdit=-1;await refresh()}catch(x){say(x.message,1)}};
-   e.append(n,c,sv);list.append(e)}
+   const v=el('input');v.value=s.ver;v.maxLength=24;v.placeholder='version';
+   const sv=el('button','pri','Save');sv.onclick=async()=>{try{const b={slot:i,name:n.value,color:c.value.slice(1)};
+    if(!s.src&&v.value!==s.ver)b.version=v.value;await api('/api/rename',b);openEdit=-1;await refresh()}catch(x){say(x.message,1)}};
+   e.append(n,c);if(!s.src)e.append(v);e.append(sv);list.append(e)}
  });
  // round preview
  const pv=$('#prev');pv.textContent='';pv.append(el('b',0,'BASECAMP'));
@@ -185,12 +190,12 @@ $('#go').onclick=async()=>{
  if(file.size>4194304){say('That file is larger than the 4 MB slot.',1);return}
  busyUp=true;$('#go').disabled=true;$('#upbar').hidden=false;
  const x=new XMLHttpRequest();
- x.open('POST','/api/upload?slot='+slot+'&replace='+(rep?1:0)+'&name='+encodeURIComponent(name)+'&color='+col);
+ x.open('POST','/api/upload?slot='+slot+'&replace='+(rep?1:0)+'&name='+encodeURIComponent(name)+'&color='+col+'&version='+encodeURIComponent($('#nver').value.trim()));
  x.setRequestHeader('X-Basecamp','1');
  x.upload.onprogress=e=>{if(e.lengthComputable)$('#upi').style.width=(e.loaded*100/e.total)+'%'};
  x.onloadend=async()=>{busyUp=false;$('#go').disabled=false;$('#upbar').hidden=true;$('#upi').style.width=0;
   let j={};try{j=JSON.parse(x.responseText)}catch(e){}
-  if(x.status===200){say('Installed '+j.name+'.'+(j.warn?' '+j.warn:''),!!j.warn);$('#file').value='';$('#nname').value=''}
+  if(x.status===200){say('Installed '+j.name+'.'+(j.warn?' '+j.warn:''),!!j.warn);$('#file').value='';$('#nname').value='';$('#nver').value=''}
   else say(j.error||'Upload failed (connection lost?)',1);
   await refresh()};
  x.send(file)};
