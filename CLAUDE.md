@@ -276,7 +276,18 @@ Other work done for Paul: a LyricFlash 1.0.1 change (persistent Wi-Fi/AudD setup
 4. The repo's GitHub default branch may still be the old `ccr-6a25cc3b-3hr42f`; Paul was asked to switch it
    to `main` (we cannot change it).
 5. Size headroom is ~36 KB; any new feature needs a size plan first.
-6. Ideas not done: mDNS (`basecamp.local`) — costs flash; page password option; more than 3 apps would need
+6. **Browser-side `.bin` checker / patcher (asked by Paul, not built yet — he was told what is possible).**
+   Checker: feasible, fully client-side (parse header/segments/app descriptor, validate checksum + SHA-256
+   with SubtleCrypto, chip id, size, app-only vs full image, plus string heuristics: CO5300/CST9217, partition
+   labels like spiffs/storage/ffat that Basecamp lacks, SD/OTA hints — heuristics can false-alarm, e.g.
+   PrintSphere contains an unused "storage" string). Patcher: **proven** on TamaPoke that changing
+   `esp_app_desc_t` name/version and recomputing the checksum byte (XOR 0xEF over segment data, stored at the
+   end of the 16-byte-aligned block) and the appended SHA-256 (over header..checksum) gives an image that
+   `esptool image_info` reports valid. Not possible/safe: changing logic (in-app OTA updater, code that calls
+   `nvs_flash_erase()` or formats a filesystem). NVS itself needs no patching: apps look partitions up by
+   name in the table on the device, so any app using `nvs` already shares it. Options if built: standalone
+   page in `docs/` (no flash cost) and/or a small pre-check in `webui.html` (~3-4 KB of the 36 KB free).
+7. Ideas not done: mDNS (`basecamp.local`) — costs flash; page password option; more than 3 apps would need
    a different partition table (forbidden) — e.g. compressed or relocatable apps would be a separate project.
 
 ---
