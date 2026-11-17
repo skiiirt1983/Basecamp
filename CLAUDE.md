@@ -6,7 +6,7 @@
 > continue the work. If you learn something non-obvious, write it down in "Lessons learned".
 > Docs-only commits do not trigger CI (see "CI and releases").
 
-Last updated for: **0.3.4** (in CI/release when this was written; check the Releases page for the latest).
+Last updated for: **0.3.4** — released (CI run #10 green, release `v0.3.4`). Check the Releases page for anything newer.
 
 ---
 
@@ -254,7 +254,7 @@ The **dummy apps** (`test_apps/dummy_app`) were used for the first on-board proo
 | 0.3.1 | Setup network off once a home Wi-Fi is saved. Paul: AP was still running. |
 | 0.3.2 | Join more reliably (12 retries, 2 attempts) and show the failure reason. |
 | 0.3.3 | Hint line updated in place (no menu rebuild), Wi-Fi 1 s after the menu, last-start reason on the page, optional version label; TamaPoke docs. Paul: did not fix the flash; **it got more pronounced and followed the Wi-Fi text changing**. |
-| 0.3.4 | Panel starts dark (no power-up white flash), Wi-Fi bring-up in its own task before the first frame, TX power capped at 12 dBm, `RESTARTED: <reason>` marker in the footer after a fault restart, `BASECAMP_ENABLE_WIFI` switch. **Untested on hardware.** |
+| 0.3.4 | Panel starts dark (no power-up white flash), Wi-Fi bring-up in its own task before the first frame, TX power capped at 12 dBm, `RESTARTED: <reason>` marker in the footer after a fault restart, `BASECAMP_ENABLE_WIFI` switch. **Released; untested on hardware** (waiting for Paul's report). |
 
 Other work done for Paul: a LyricFlash 1.0.1 change (persistent Wi-Fi/AudD setup hint) prepared as draft PR
 #61 in `skiiirt1983/LyricFlash` — not merged by us; merging there publishes a release.
