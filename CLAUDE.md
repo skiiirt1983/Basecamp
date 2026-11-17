@@ -1,4 +1,4 @@
-# CLAUDE.md — SLOPEFORM Basecamp: rules, hand-over and reference
+# CLAUDE.md — Basecamp: rules, hand-over and reference
 
 > **KEEP THIS FILE CURRENT.** Any change to code, config, docs, tests, CI, behaviour, known issues or
 > decisions must update this file **in the same commit** (status snapshot, changelog, open issues,
@@ -6,7 +6,7 @@
 > continue the work. If you learn something non-obvious, write it down in "Lessons learned".
 > Docs-only commits do not trigger CI (see "CI and releases").
 
-Last updated for: **0.3.4** — released (CI run #10 green, release `v0.3.4`). Check the Releases page for anything newer.
+Last updated for: **0.3.5** — rename to "Basecamp" + web flasher page; check CI/Releases for anything newer.
 
 ---
 
@@ -130,6 +130,8 @@ need `replace=1`.
 ## 4. Repo map
 
 ```
+site/                     GitHub Pages flasher (index.html + vendored esp-web-tools in site/ewt, MIT/Apache; no CDN)
+tools/make_site.sh        builds site_out/ (adds firmware/*.bin + manifests with the PROJECT_VER); CI pushes it to branch gh-pages
 CMakeLists.txt            PROJECT_VER lives here (drives release version)
 partitions.csv            FIXED
 sdkconfig.defaults        size trims, PSRAM, main-task stack 8 KB, ...
@@ -254,6 +256,7 @@ The **dummy apps** (`test_apps/dummy_app`) were used for the first on-board proo
 | 0.3.1 | Setup network off once a home Wi-Fi is saved. Paul: AP was still running. |
 | 0.3.2 | Join more reliably (12 retries, 2 attempts) and show the failure reason. |
 | 0.3.3 | Hint line updated in place (no menu rebuild), Wi-Fi 1 s after the menu, last-start reason on the page, optional version label; TamaPoke docs. Paul: did not fix the flash; **it got more pronounced and followed the Wi-Fi text changing**. |
+| 0.3.5 | Project renamed to plain "Basecamp" (header comments, README, User-Agent `Basecamp-launcher`; SSID `BaseCamp-Setup`, NVS namespace and CMake names unchanged). Paul accepted 0.3.4 ("good to go"). Added GitHub Pages web flasher (`site/`, `tools/make_site.sh`): two esp-web-tools buttons, New install = 16 MB image at 0x0, Update = launcher at 0x90000 (Paul wrote 0x9000, which is NVS; launcher is 0x90000). Firmware only changes in comments/User-Agent. |
 | 0.3.4 | Panel starts dark (no power-up white flash), Wi-Fi bring-up in its own task before the first frame, TX power capped at 12 dBm, `RESTARTED: <reason>` marker in the footer after a fault restart, `BASECAMP_ENABLE_WIFI` switch. **Released; untested on hardware** (waiting for Paul's report). |
 
 Other work done for Paul: a LyricFlash 1.0.1 change (persistent Wi-Fi/AudD setup hint) prepared as draft PR
@@ -301,3 +304,7 @@ Other work done for Paul: a LyricFlash 1.0.1 change (persistent Wi-Fi/AudD setup
 4. Update this file (status, history, lessons, open issues) and README/docs **in the same commit**.
 5. Push to `main`, watch CI to green, hand Paul the link, file name, address and flash steps — and what was
    and was not tested on hardware.
+
+## 11. Web flasher site
+
+CI (unsuffixed version on main) force-pushes `site_out/` to branch `gh-pages` after the build. Pages must be enabled by the owner: Settings → Pages → Deploy from branch `gh-pages` / root. Firmware is served same-origin (release assets have no CORS). Page needs Chrome/Edge (Web Serial). Repo is renamed to `skiiirt1983/Basecamp` and public (owner did these by hand; tools here cannot). Updating esp-web-tools: `npm pack esp-web-tools@<ver>` and copy `dist/web/*` into `site/ewt/`. Not tested on hardware: the browser flashing itself.

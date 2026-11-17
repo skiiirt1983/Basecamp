@@ -1,5 +1,5 @@
 /*
- * SLOPEFORM / Project Basecamp - factory launcher.
+ * Basecamp - factory launcher.
  *
  * The menu shows whatever is installed in the three app slots (ota_0..2), in
  * the order chosen on the web page. Tapping an app stores the selection in

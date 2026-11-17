@@ -1,5 +1,5 @@
 /*
- * SLOPEFORM / Project Basecamp - custom 2nd-stage bootloader entry point.
+ * Basecamp - custom 2nd-stage bootloader entry point.
  *
  * Derived from ESP-IDF v5.5 components/bootloader/subproject/main/bootloader_start.c
  * (Apache-2.0, Espressif Systems). Only the partition selection differs:

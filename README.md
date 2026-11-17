@@ -1,4 +1,4 @@
-# SLOPEFORM Bootloader — Project Basecamp
+# Basecamp
 
 Boot launcher for the **Waveshare ESP32-S3-Touch-AMOLED-1.75**
 (ESP32-S3, 16 MB flash, 8 MB octal PSRAM, CO5300 466×466 QSPI AMOLED, CST9217 touch, AXP2101 PMU).
@@ -27,8 +27,10 @@ power-on ─► custom bootloader ─► cold reset? ──yes──► launcher
 
 ## Install (fresh device)
 
+**Easiest:** open the flasher page (https://skiiirt1983.github.io/Basecamp/) in Chrome or Edge, plug in the board, press *Install Basecamp* (or *Update Basecamp* to keep apps and settings). The manual steps follow.
+
 1. Download **`Basecamp-<version>-FRESH-INSTALL-USB.bin`** from the latest
-   [release](https://github.com/skiiirt1983/project-basecamp/releases/latest).
+   [release](https://github.com/skiiirt1983/Basecamp/releases/latest).
 2. Flash it at **0x0**. It is a full 16 MB image, so it **erases everything**, including all app
    settings.
    - esptool: `esptool.py --chip esp32s3 -b 921600 write_flash 0x0 Basecamp-<version>-FRESH-INSTALL-USB.bin`

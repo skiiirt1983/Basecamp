@@ -1,5 +1,5 @@
 /*
- * SLOPEFORM / Project Basecamp - boot slot selection contract.
+ * Basecamp - boot slot selection contract.
  *
  * Shared between the custom 2nd-stage bootloader (bootloader_components/main)
  * and the launcher / test apps. Header-only, no IDF component dependencies

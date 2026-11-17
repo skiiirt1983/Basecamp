@@ -1,4 +1,4 @@
-# SLOPEFORM / Project Basecamp partition table (fixed - do not change offsets)
+# Basecamp partition table (fixed - do not change offsets)
 # Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x80000
 otadata,  data, ota,     0x89000,  0x2000

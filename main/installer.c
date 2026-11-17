@@ -26,7 +26,7 @@ static const char *TAG = "install";
 #define API_FMT       "https://api.github.com/repos/%s/releases/latest"
 #define API_MAX_BODY  (512 * 1024)
 #define DL_CHUNK      4096
-#define USER_AGENT    "SLOPEFORM-Basecamp-launcher"
+#define USER_AGENT    "Basecamp-launcher"
 
 void inst_preset(int k, inst_source_t *src, char name[32])
 {
