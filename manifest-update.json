@@ -1,0 +1,2 @@
+{"name":"Basecamp","version":"0.3.5","new_install_prompt_erase":false,
+ "builds":[{"chipFamily":"ESP32-S3","parts":[{"path":"firmware/launcher.bin","offset":589824}]}]}

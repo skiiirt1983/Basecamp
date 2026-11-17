@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Basecamp</title>
+<style>
+:root{--bg:#0f1115;--fg:#e8eaed;--mut:#9aa0a6;--card:#181b21;--acc:#4da3ff;--line:#2a2f38}
+@media (prefers-color-scheme:light){:root{--bg:#f6f7f9;--fg:#1b1e23;--mut:#5f6670;--card:#fff;--acc:#0b63c9;--line:#dde1e7}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:24px 16px 48px}
+h1{margin:0 0 4px}h2{margin:0 0 6px;font-size:1.15rem}
+p{margin:6px 0}.mut{color:var(--mut)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:16px 0}
+code{background:var(--bg);padding:1px 5px;border-radius:4px}
+esp-web-install-button button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:12px 18px;font-size:1rem;cursor:pointer;margin-top:8px}
+#warn{display:none;border-color:#c0392b}
+a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+<h1>Basecamp</h1>
+<p class="mut">Boot launcher for the Waveshare ESP32-S3-Touch-AMOLED-1.75. Every power-on shows a menu of your apps; tap one to start it.</p>
+
+<div class="card" id="warn"><b>Use Chrome or Edge on a desktop computer.</b> Other browsers cannot flash over USB.</div>
+
+<div class="card">
+<h2>New install</h2>
+<p>First time, or start clean. <b>Erases everything</b> on the board, including app settings.</p>
+<esp-web-install-button manifest="manifest-fresh.json"><button slot="activate">Install Basecamp</button></esp-web-install-button>
+</div>
+
+<div class="card">
+<h2>Update only</h2>
+<p>Replaces just the launcher. Your apps, their order and settings stay.</p>
+<esp-web-install-button manifest="manifest-update.json"><button slot="activate">Update Basecamp</button></esp-web-install-button>
+</div>
+
+<div class="card">
+<h2>How</h2>
+<ol>
+<li>Plug the board into your computer with a USB-C data cable.</li>
+<li>Click a button, pick the board's serial port in the popup, and confirm.</li>
+<li>Wait until it says finished (a new install takes a few minutes).</li>
+<li>Unplug and replug the board. The menu appears.</li>
+<li>Join the open Wi-Fi <code>BaseCamp-Setup</code> on your phone (or browse to <code>192.168.4.1</code>) to add apps.</li>
+</ol>
+<p class="mut">If the port does not show up, hold BOOT while plugging in, then try again.</p>
+</div>
+
+<p class="mut"><span id="ver"></span> · <a href="https://github.com/skiiirt1983/Basecamp">Source and docs</a></p>
+</main>
+<script>
+if(!("serial" in navigator))document.getElementById("warn").style.display="block";
+fetch("manifest-update.json").then(r=>r.json()).then(m=>{document.getElementById("ver").textContent="Version "+m.version}).catch(()=>{});
+</script>
+<script type="module" src="ewt/install-button.js"></script>
+</body>
+</html>
