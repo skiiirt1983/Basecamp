@@ -58,12 +58,13 @@ static inst_job_t s_failed[APPS_MAX];
 static int s_nfailed;
 static ctl_job_t s_job;
 static SemaphoreHandle_t s_job_mtx;
-static char s_footer[48];
+static char s_footer[64];
 static int s_up_slot = -1;
 
 /* ---------- why did we (re)start? ---------- */
 
 static char s_boot_text[80];
+static bool s_abnormal_reset;
 
 static const char *reason_name(int r)
 {
@@ -100,6 +101,8 @@ static void record_boot(void)
     } else {
         snprintf(s_boot_text, sizeof(s_boot_text), "%s (before: %s)", reason_name(cur), reason_name(prev));
     }
+    s_abnormal_reset = cur == ESP_RST_BROWNOUT || cur == ESP_RST_PANIC || cur == ESP_RST_INT_WDT ||
+                       cur == ESP_RST_TASK_WDT || cur == ESP_RST_WDT;
     ESP_LOGI(TAG, "start: %s", s_boot_text);
 }
 
@@ -670,6 +673,11 @@ static void footer_task(void *arg)
         } else {
             snprintf(s_footer, sizeof(s_footer), "%s", usb ? "USB" : "");
         }
+        if (s_abnormal_reset) {                /* the last start was caused by a fault, not a power-on */
+            char tmp[112];
+            snprintf(tmp, sizeof(tmp), "RESTARTED: %.14s  %s", s_boot_text, s_footer);
+            strlcpy(s_footer, tmp, sizeof(s_footer));
+        }
         ui_set_footer(s_footer);
         /* On the home network with no setup network up: if the link was lost for good (router
          * restarted, moved house), retry once and fall back to the setup network. */
@@ -678,6 +686,25 @@ static void footer_task(void *arg)
         }
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
+}
+
+static SemaphoreHandle_t s_radio_ready;
+static volatile bool s_radio_ok;
+
+/* All Wi-Fi bring-up (driver init, RF calibration, radio start) runs in its own task: if any of it
+ * ever blocks, the menu still comes up. */
+static void radio_boot_task(void *arg)
+{
+    if (net_init() == ESP_OK) {
+        if (net_has_credentials()) {
+            net_sta_start();
+        } else {
+            net_ap_start();
+        }
+        s_radio_ok = true;
+    }
+    xSemaphoreGive(s_radio_ready);
+    vTaskDelete(NULL);
 }
 
 void app_main(void)
@@ -697,18 +724,34 @@ void app_main(void)
     s_job_mtx = xSemaphoreCreateMutex();
     s_job.slot = -1;
     slots_init();
+
+    /* Radio first, while the panel is still off: its start-up current surge then cannot show on the
+     * screen. Connecting / mode hand-over follows once the menu is up (wifi_kick below). */
+    s_radio_ready = xSemaphoreCreateBinary();
+#if CONFIG_BASECAMP_ENABLE_WIFI
+    bool net_ok = xTaskCreate(radio_boot_task, "radio", 4096, NULL, 1, NULL) == pdPASS;
+#else
+    bool net_ok = false;
+#endif
+
     slots_scan_all();
+    board_set_dark_start(true);                /* no white flash from the panel's random RAM at power-up */
     ESP_ERROR_CHECK(board_init(NULL));
 
     s_work = xQueueCreate(4, sizeof(work_t));
     ui_init(on_request);
     ui_set_hint("Starting Wi-Fi ...");
     show_menu();
+    /* Light the panel only once the first frame has reached it and the radio has started (a Wi-Fi
+     * problem must never keep the menu from appearing, so the wait is bounded). */
+    bool radio_up = net_ok && xSemaphoreTake(s_radio_ready, pdMS_TO_TICKS(3000)) == pdTRUE && s_radio_ok;
+    vTaskDelay(pdMS_TO_TICKS(200));
+    board_set_brightness(100);
     xTaskCreate(worker, "worker", 10240, NULL, 5, NULL);
     xTaskCreate(footer_task, "footer", 3072, NULL, 2, NULL);
 
     /* Web page + Wi-Fi (setup network or the saved home network). The menu works even if this fails. */
-    if (net_init() == ESP_OK && webui_start() == ESP_OK) {
+    if (net_ok && radio_up && webui_start() == ESP_OK) {
         wifi_kick();
     } else {
         ui_set_hint("Wi-Fi unavailable");

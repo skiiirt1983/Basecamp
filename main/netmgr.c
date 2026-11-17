@@ -12,6 +12,7 @@
 #include "esp_netif.h"
 #include "nvs.h"
 #include "lwip/sockets.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "net";
 
@@ -310,6 +311,7 @@ static esp_err_t radio_start(void)
     if (!s_started) {
         ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "start");
         esp_wifi_set_ps(WIFI_PS_NONE);
+        esp_wifi_set_max_tx_power(CONFIG_BASECAMP_WIFI_TX_QDBM);   /* lower peak current: the display shares this supply */
         s_started = true;
         vTaskDelay(pdMS_TO_TICKS(300));            /* let the driver finish starting before the first connect */
     }

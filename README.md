@@ -109,7 +109,7 @@ Everything switches off when an app starts.
 | nvs | data | nvs | 0x9000 | 512 KB | shared by launcher + all apps |
 | otadata | data | ota | 0x89000 | 8 KB | erased; **not** used for selection |
 | phy_init | data | phy | 0x8B000 | 4 KB | |
-| launcher | app | factory | 0x90000 | 1 MB | this launcher (~985 KB) |
+| launcher | app | factory | 0x90000 | 1 MB | this launcher (~1.01 MB image, ~36 KB free) |
 | ota_0 | app | ota_0 | 0x190000 | 4 MB | app slot 1 |
 | ota_1 | app | ota_1 | 0x590000 | 4 MB | app slot 2 |
 | ota_2 | app | ota_2 | 0x990000 | 4 MB | app slot 3 |
@@ -162,14 +162,15 @@ The stock `bootloader_utility_load_boot_image()` falls back to *lower OTA slots*
 - **AXP2101:** makes sure DCDC1 (`VCC3V3`, the SoC rail) is on, sets ALDO1/ALDO2 to 3.3 V and on
   (ALDO1 is `A3V3`, feeding the microphone ADC), and enables the battery/VBUS ADC and fuel gauge. Other
   rails keep their defaults.
+- **Start-up:** the Wi-Fi radio is started in its own task before the display is initialised, so a Wi-Fi problem can never keep the menu from appearing and the radio's start-up current surge happens while the screen is still dark. The panel itself comes up dark (its RAM holds random pixels until the first frame, which would show as a white flash) and is lit after the first frame. Wi-Fi transmit power is capped at 12 dBm (`BASECAMP_WIFI_TX_QDBM`). If the launcher was restarted by a fault (brown-out, crash, watchdog), the menu's bottom line starts with `RESTARTED: <reason>` and the web page says it at the bottom.
 - **Display and touch:** `espressif/esp_lcd_co5300` + `waveshare/esp_lcd_touch_cst9217` + `esp_lvgl_port`;
   init table, column gap, even-pixel rounder and touch mirroring from Waveshare's BSP (v3.0.1).
 
 ### Size budget (factory partition = 1 MB)
-The launcher is about **985 KB** (CI prints `idf.py size` and fails above 1 MB). To fit Wi-Fi, TLS, a web
+The launcher is about **1.01 MB of the 1 MB-class slot's 1,048,576 bytes** (CI prints `idf.py size` and fails above the limit). To fit Wi-Fi, TLS, a web
 server and LVGL, `sdkconfig.defaults` sets: `-Os`; warning-level logs; silent asserts; ROM nano printf;
 client-only TLS 1.2 with the common CA bundle; no WPA3, enterprise Wi-Fi or IPv6; only the LVGL widgets
-in use (label, button, arc) with RGB565/A8/ARGB8888 rendering. About 40 KB remain.
+in use (label, button, arc) with RGB565/A8/ARGB8888 rendering. About 36 KB remain.
 
 ## Build and CI
 

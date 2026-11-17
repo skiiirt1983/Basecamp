@@ -3,6 +3,9 @@ name: Basecamp firmware
 on:
   push:
     branches: [main]
+    paths-ignore:        # docs-only commits (README, CLAUDE.md, docs/) do not rebuild or re-release
+      - '**.md'
+      - 'docs/**'
   pull_request:
   workflow_dispatch:
 

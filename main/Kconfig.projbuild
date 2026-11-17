@@ -10,6 +10,22 @@ menu "Basecamp launcher"
         string "default app 3 display name"
         default "LyricFlash"
 
+    config BASECAMP_ENABLE_WIFI
+        bool "Enable Wi-Fi, the setup network and the web page"
+        default y
+        help
+            Turn off only for emulator runs: QEMU has no radio, so the RF calibration never
+            finishes there.
+
+    config BASECAMP_WIFI_TX_QDBM
+        int "Wi-Fi transmit power (quarter dBm, 8..84)"
+        range 8 84
+        default 48
+        help
+            48 = 12 dBm. The default of the Wi-Fi driver is 20 dBm; a phone next to the
+            device does not need it, and the peak current of the radio can make the
+            display flash or the chip brown out on a weak supply.
+
     config BASECAMP_VERIFY_SLOTS
         bool "Fully verify each slot image (SHA-256) before showing it as bootable"
         default y

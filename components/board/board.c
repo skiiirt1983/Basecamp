@@ -36,6 +36,15 @@ static const char *TAG = "board";
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_panel_handle_t s_panel;
 
+/* Brightness written by the init table. The panel's RAM holds random pixels until the first frame is
+ * sent; at full brightness they show as a white flash. board_set_dark_start() makes it come up dark. */
+static uint8_t s_init_brightness = 0xFF;
+
+void board_set_dark_start(bool dark)
+{
+    s_init_brightness = dark ? 0x00 : 0xFF;
+}
+
 static const co5300_lcd_init_cmd_t s_lcd_init_cmds[] = {
     {0xFE, (uint8_t[]){0x20}, 1, 0},
     {0x19, (uint8_t[]){0x10}, 1, 0},
@@ -45,7 +54,7 @@ static const co5300_lcd_init_cmd_t s_lcd_init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, &s_init_brightness, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x06, 0x01, 0xD7}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xD1}, 4, 600},
